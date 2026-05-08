@@ -75,65 +75,12 @@ def remove_gray_side_rectangles(image):
     return image[:, left:end], left, right
 
 
-def equalize_tile(tile, clip_limit=2.0, bins=256):
-    tile_u8 = np.clip(np.rint(tile), 0, 255).astype(np.uint8)
-    histogram = np.bincount(tile_u8.ravel(), minlength=bins).astype(np.float32)
-
-    clip_value = max(1.0, clip_limit * tile_u8.size / bins)
-    excess = np.maximum(histogram - clip_value, 0.0).sum()
-    histogram = np.minimum(histogram, clip_value)
-    histogram += excess / bins
-
-    cdf = histogram.cumsum()
-    cdf_min = cdf[np.flatnonzero(cdf)[0]] if np.any(cdf) else 0.0
-    denominator = cdf[-1] - cdf_min
-    if denominator <= 0:
-        return np.arange(bins, dtype=np.float32)
-
-    return np.clip((cdf - cdf_min) / denominator * 255.0, 0, 255)
-
-
 def clahe(image, tile_grid_size=(8, 8), clip_limit=2.0):
-    image_u8 = np.clip(np.rint(image), 0, 255).astype(np.uint8)
-    height, width = image_u8.shape
-    grid_rows, grid_cols = tile_grid_size
-
-    y_edges = np.linspace(0, height, grid_rows + 1, dtype=int)
-    x_edges = np.linspace(0, width, grid_cols + 1, dtype=int)
-    y_centers = (y_edges[:-1] + y_edges[1:] - 1) / 2.0
-    x_centers = (x_edges[:-1] + x_edges[1:] - 1) / 2.0
-
-    luts = np.empty((grid_rows, grid_cols, 256), dtype=np.float32)
-    for row in range(grid_rows):
-        for col in range(grid_cols):
-            tile = image_u8[y_edges[row] : y_edges[row + 1], x_edges[col] : x_edges[col + 1]]
-            luts[row, col] = equalize_tile(tile, clip_limit=clip_limit)
-
-    output = np.empty_like(image_u8, dtype=np.float32)
-    for y in range(height):
-        bottom = np.searchsorted(y_centers, y, side="right")
-        top = max(0, bottom - 1)
-        bottom = min(grid_rows - 1, bottom)
-        if top == bottom:
-            y_weight = 0.0
-        else:
-            y_weight = (y - y_centers[top]) / (y_centers[bottom] - y_centers[top])
-
-        for x in range(width):
-            right = np.searchsorted(x_centers, x, side="right")
-            left = max(0, right - 1)
-            right = min(grid_cols - 1, right)
-            if left == right:
-                x_weight = 0.0
-            else:
-                x_weight = (x - x_centers[left]) / (x_centers[right] - x_centers[left])
-
-            value = image_u8[y, x]
-            top_value = (1.0 - x_weight) * luts[top, left, value] + x_weight * luts[top, right, value]
-            bottom_value = (1.0 - x_weight) * luts[bottom, left, value] + x_weight * luts[bottom, right, value]
-            output[y, x] = (1.0 - y_weight) * top_value + y_weight * bottom_value
-
-    return output
+    from skimage.exposure import equalize_adapthist
+    normalized = np.clip(image, 0.0, 255.0) / 255.0
+    # skimage clip_limit is a fraction [0,1]; original used OpenCV-style absolute value
+    equalized = equalize_adapthist(normalized, kernel_size=tile_grid_size, clip_limit=clip_limit / 100.0, nbins=256)
+    return (equalized * 255.0).astype(np.float32)
 
 
 def flatten_images(images):
@@ -145,108 +92,29 @@ def flatten_images(images):
 # ---------------------------------------------------------------------------
 
 def compute_hog(image, cell_size=8, n_bins=9, block_size=2):
-    """
-    Compute HOG feature vector for a single grayscale image (float32, 0-255).
+    from skimage.feature import hog as sk_hog
+    features, hog_image = sk_hog(
+        image / 255.0,
+        orientations=n_bins,
+        pixels_per_cell=(cell_size, cell_size),
+        cells_per_block=(block_size, block_size),
+        block_norm="L2-Hys",
+        visualize=True,
+        feature_vector=True,
+    )
+    peak = hog_image.max()
+    viz = (hog_image / (peak + 1e-8) * 255.0).astype(np.float32)
+    return features.astype(np.float32), viz
 
-    Steps:
-      1. Central-difference gradients (Gx, Gy).
-      2. Magnitude and unsigned angle (0-180 deg) per pixel.
-      3. Soft bilinear bin assignment → per-cell histograms.
-      4. L2 block normalisation over (block_size * block_size) cell windows.
-
-    Returns
-    -------
-    feature_vector : 1-D float32 array of length n_blocks_y*n_blocks_x*block_size^2*n_bins
-    cell_hists     : float32 array (n_cells_y, n_cells_x, n_bins) — raw, un-normalised
-    """
-    image_f = image.astype(np.float32)
-    gx = np.zeros_like(image_f)
-    gy = np.zeros_like(image_f)
-    gx[:, 1:-1] = image_f[:, 2:] - image_f[:, :-2]
-    gy[1:-1, :] = image_f[2:, :] - image_f[:-2, :]
-
-    magnitude = np.sqrt(gx ** 2 + gy ** 2)
-    angle = np.rad2deg(np.arctan2(gy, gx)) % 180.0  # unsigned 0-180
-
-    height, width = image_f.shape
-    n_cells_y = height // cell_size
-    n_cells_x = width // cell_size
-
-    bin_width = 180.0 / n_bins
-    bin_idx = angle / bin_width - 0.5           # fractional bin index
-    bin_lo = np.floor(bin_idx).astype(np.int32) % n_bins
-    bin_hi = (bin_lo + 1) % n_bins
-    weight_hi = (bin_idx - np.floor(bin_idx)).astype(np.float32)
-    weight_lo = 1.0 - weight_hi
-
-    cell_hists = np.zeros((n_cells_y, n_cells_x, n_bins), dtype=np.float32)
-    for cy in range(n_cells_y):
-        for cx in range(n_cells_x):
-            y0, y1 = cy * cell_size, (cy + 1) * cell_size
-            x0, x1 = cx * cell_size, (cx + 1) * cell_size
-            mag  = magnitude[y0:y1, x0:x1].ravel()
-            lo   = bin_lo[y0:y1, x0:x1].ravel()
-            hi   = bin_hi[y0:y1, x0:x1].ravel()
-            wlo  = weight_lo[y0:y1, x0:x1].ravel()
-            whi  = weight_hi[y0:y1, x0:x1].ravel()
-            np.add.at(cell_hists[cy, cx], lo, wlo * mag)
-            np.add.at(cell_hists[cy, cx], hi, whi * mag)
-
-    # L2 block normalisation
-    n_blocks_y = n_cells_y - block_size + 1
-    n_blocks_x = n_cells_x - block_size + 1
-    eps = 1e-6
-    blocks = []
-    for by in range(n_blocks_y):
-        for bx in range(n_blocks_x):
-            block = cell_hists[by : by + block_size, bx : bx + block_size, :].ravel()
-            blocks.append(block / np.sqrt(np.dot(block, block) + eps * eps))
-
-    return np.concatenate(blocks).astype(np.float32), cell_hists
-
-
-def hog_visualization(cell_hists, cell_size=8, n_bins=9):
-    """
-    Render HOG cell histograms as a grayscale image.
-    In each cell, draw oriented lines whose brightness is proportional to that
-    bin's magnitude — visually shows which edge directions dominate.
-    """
-    n_cells_y, n_cells_x, _ = cell_hists.shape
-    vis = np.zeros((n_cells_y * cell_size, n_cells_x * cell_size), dtype=np.float32)
-    angles = np.arange(n_bins) * np.pi / n_bins  # center angle of each bin
-
-    for cy in range(n_cells_y):
-        for cx in range(n_cells_x):
-            hist = cell_hists[cy, cx]
-            peak = hist.max()
-            if peak < 1e-8:
-                continue
-            center_y = cy * cell_size + cell_size / 2.0
-            center_x = cx * cell_size + cell_size / 2.0
-            half = cell_size / 2.0 - 1.0
-            for b in range(n_bins):
-                weight = hist[b] / peak
-                if weight < 0.01:
-                    continue
-                cos_a = np.cos(angles[b])
-                sin_a = np.sin(angles[b])
-                for t in np.linspace(-half, half, cell_size * 3):
-                    py = int(round(center_y + t * sin_a))
-                    px = int(round(center_x + t * cos_a))
-                    if 0 <= py < vis.shape[0] and 0 <= px < vis.shape[1]:
-                        if weight > vis[py, px]:
-                            vis[py, px] = weight
-
-    return vis * 255.0
 
 
 def hog_batch(images, cell_size=8, n_bins=9, block_size=2):
     """Compute HOG for a list of images. Returns (feature_matrix, viz_images)."""
     features, vizs = [], []
     for image in images:
-        feat, cell_hists = compute_hog(image, cell_size=cell_size, n_bins=n_bins, block_size=block_size)
+        feat, viz = compute_hog(image, cell_size=cell_size, n_bins=n_bins, block_size=block_size)
         features.append(feat)
-        vizs.append(hog_visualization(cell_hists, cell_size=cell_size, n_bins=n_bins))
+        vizs.append(viz)
     return np.stack(features).astype(np.float32), vizs
 
 
@@ -262,10 +130,12 @@ def hog_vector_to_display(vector):
 # ---------------------------------------------------------------------------
 
 def fit_standard_scaler(matrix):
-    mean = matrix.mean(axis=0)
-    std = matrix.std(axis=0)
+    from sklearn.preprocessing import StandardScaler
+    scaler = StandardScaler()
+    scaler.fit(matrix)
+    std = scaler.scale_.astype(np.float32)
     std[std < 1e-6] = 1.0
-    return mean, std
+    return scaler.mean_.astype(np.float32), std
 
 
 def standard_scale(matrix, mean, std):
@@ -273,16 +143,15 @@ def standard_scale(matrix, mean, std):
 
 
 def fit_pca(matrix, n_components):
-    pca_mean = matrix.mean(axis=0)
-    centered = matrix - pca_mean
-    _, singular_values, vt = np.linalg.svd(centered, full_matrices=False)
-
-    max_components = min(n_components, vt.shape[0])
-    components = vt[:max_components]
-    explained_variance = (singular_values**2) / max(matrix.shape[0] - 1, 1)
-    total_variance = explained_variance.sum()
-    explained_ratio = explained_variance / total_variance if total_variance > 0 else explained_variance
-    return pca_mean, components, explained_ratio[:max_components]
+    from sklearn.decomposition import PCA
+    n = min(n_components, min(matrix.shape))
+    pca = PCA(n_components=n, svd_solver="randomized", random_state=42)
+    pca.fit(matrix)
+    return (
+        pca.mean_.astype(np.float32),
+        pca.components_.astype(np.float32),
+        pca.explained_variance_ratio_.astype(np.float32),
+    )
 
 
 def pca_reconstruct(matrix, pca_mean, components):
@@ -423,7 +292,10 @@ def build_dataset(folder, pipeline_mean, pipeline_std, pca_mean, pca_components,
     """
     paths = sorted(glob.glob(os.path.join(folder, "*.pgm")), key=natural_key)
     kept_images, kept_labels = [], []
-    for path in paths:
+    total = len(paths)
+    for i, path in enumerate(paths):
+        if (i + 1) % max(1, total // 10) == 0 or (i + 1) == total:
+            print(f"  loading+CLAHE {i + 1}/{total}", end="\r", flush=True)
         image = load_gray_image(path)
         cropped, _, _ = remove_gray_side_rectangles(image)
         if cropped.shape != common_shape:
@@ -431,36 +303,57 @@ def build_dataset(folder, pipeline_mean, pipeline_std, pca_mean, pca_components,
         kept_images.append(clahe(cropped))
         pid = person_id(path)
         kept_labels.append(int(pid[1:]) if pid else -1)
+    print()
+    print(f"  Computing HOG for {len(kept_images)} images...")
     X = apply_pipeline(kept_images, pipeline_mean, pipeline_std, pca_mean, pca_components)
     y = np.array(kept_labels, dtype=np.int32)
     return X, y
 
 
-def prepare_dataset(folder=TRAIN_FOLDER, fit_limit=800, n_components=123, test_size=0.2, random_state=42):
+def prepare_dataset(folder=TRAIN_FOLDER, fit_limit=800, n_components=123, cache_file="dataset_cache.npz"):
     """
-    Full pipeline: load images → crop → CLAHE → HOG → scale → PCA → train/test split.
+    Full pipeline: load images → crop → CLAHE → HOG → scale → PCA → (X, y).
+    Results and pipeline parameters are saved to *cache_file* so subsequent
+    calls load instantly. The saved parameters can also be used to transform
+    new images with the same pipeline.
 
     Parameters
     ----------
-    folder       : folder with .pgm images
-    fit_limit    : images used to fit scaler + PCA (0 = all)
-    n_components : PCA components to keep
-    test_size    : fraction held out for testing
-    random_state : random seed for reproducibility
+    folder      : folder with .pgm images
+    fit_limit   : images used to fit scaler + PCA (0 = all)
+    n_components: PCA components to keep
+    cache_file  : path to .npz cache; set to None to disable caching
 
     Returns
     -------
-    X_train, X_test, y_train, y_test  — numpy arrays, X shape (n, n_components)
+    X            : float32 array (n_images, n_components)
+    y            : int32 array  (n_images,)  — integer person IDs
+    pipeline     : dict with keys pipeline_mean, pipeline_std, pca_mean,
+                   pca_components, common_shape — needed to transform new images
     """
-    from sklearn.model_selection import train_test_split
+    if cache_file and os.path.exists(cache_file):
+        print(f"Loading cached dataset from {cache_file!r}...")
+        data = np.load(cache_file)
+        X, y = data["X"], data["y"]
+        pipeline = {
+            "pipeline_mean": data["pipeline_mean"],
+            "pipeline_std":  data["pipeline_std"],
+            "pca_mean":      data["pca_mean"],
+            "pca_components":data["pca_components"],
+            "common_shape":  tuple(data["common_shape"]),
+        }
+        print(f"Loaded: {X.shape[0]} images, {X.shape[1]} features, {np.unique(y).size} people.")
+        return X, y, pipeline
 
     paths = sorted(glob.glob(os.path.join(folder, "*.pgm")), key=natural_key)
     if not paths:
         raise FileNotFoundError(f"No .pgm images found in {folder!r}")
 
     fit_paths = load_fit_paths(paths, fit_limit)
+    print(f"[1/7] Found {len(paths)} images total. Using {len(fit_paths)} to fit pipeline.")
 
     # Fit phase: crop → CLAHE → HOG → scaler → PCA
+    print(f"[2/7] Loading and cropping {len(fit_paths)} fit images...")
     fit_raw = [load_gray_image(p) for p in fit_paths]
     fit_cropped, fit_crop_paths = [], []
     for path, img in zip(fit_paths, fit_raw):
@@ -469,17 +362,33 @@ def prepare_dataset(folder=TRAIN_FOLDER, fit_limit=800, n_components=123, test_s
         fit_crop_paths.append(path)
 
     fit_crop_paths, fit_cropped, common_shape, _ = keep_common_shape(fit_crop_paths, fit_cropped)
+    print(f"[3/7] Applying CLAHE to {len(fit_cropped)} fit images (shape {common_shape})...")
     fit_clahe = [clahe(img) for img in fit_cropped]
+    print(f"[4/7] Computing HOG features for {len(fit_clahe)} fit images...")
     fit_hog, _ = hog_batch(fit_clahe)
+    print(f"[5/7] Fitting scaler and PCA ({n_components} components) on {fit_hog.shape[0]} HOG vectors ({fit_hog.shape[1]} features)...")
     pipeline_mean, pipeline_std = fit_standard_scaler(fit_hog)
     fit_scaled = standard_scale(fit_hog, pipeline_mean, pipeline_std)
     pca_mean, pca_components, _ = fit_pca(fit_scaled, n_components)
 
-    # Transform all images
+    print(f"[6/7] Transforming all {len(paths)} images...")
     X, y = build_dataset(folder, pipeline_mean, pipeline_std, pca_mean, pca_components, common_shape)
-    print(f"Dataset ready: {X.shape[0]} images, {X.shape[1]} features, {np.unique(y).size} people.")
+    print(f"[7/7] Done. Dataset: {X.shape[0]} images, {X.shape[1]} features, {np.unique(y).size} people.")
 
-    return train_test_split(X, y, test_size=test_size, random_state=random_state, stratify=y)
+    pipeline = {
+        "pipeline_mean":  pipeline_mean,
+        "pipeline_std":   pipeline_std,
+        "pca_mean":       pca_mean,
+        "pca_components": pca_components,
+        "common_shape":   np.array(common_shape),
+    }
+
+    if cache_file:
+        np.savez_compressed(cache_file, X=X, y=y, **pipeline)
+        print(f"Dataset and pipeline parameters saved to {cache_file!r}.")
+
+    pipeline["common_shape"] = common_shape  # return as tuple, not array
+    return X, y, pipeline
 
 
 def keep_common_shape(paths, images):
