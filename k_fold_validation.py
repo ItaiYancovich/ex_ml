@@ -1,5 +1,7 @@
 from sklearn.model_selection import KFold
 from sklearn.metrics import accuracy_score
+import statistics
+from collections import Counter
 
 
 def k_fold_cross_validation(model, X, y, k=5):
@@ -31,7 +33,7 @@ def k_fold_cross_validation(model, X, y, k=5):
     return scores
 
 
-def inner_k_fold_cross_validation(model_class, X, y, hyperparameter_grid, k=5):
+def inner_k_fold_cross_validation(model_class, X, y, hyperparameter_grid, k_inner=5):
     """
     Perform inner k-fold cross-validation for hyperparameter tuning.
 
@@ -40,7 +42,7 @@ def inner_k_fold_cross_validation(model_class, X, y, hyperparameter_grid, k=5):
     X: The feature dataset (numpy array or pandas DataFrame).
     y: The target labels (numpy array or pandas Series).
     hyperparameter_grid: A list of dictionaries containing hyperparameter combinations.
-    k: The number of folds for cross-validation (default is 5).
+    k_inner: The number of folds for inner cross-validation (default is 5).
 
     Returns:
     A tuple containing:
@@ -55,7 +57,7 @@ def inner_k_fold_cross_validation(model_class, X, y, hyperparameter_grid, k=5):
 
     for hyperparameters in hyperparameter_grid:
         model = model_class(**hyperparameters)
-        scores = k_fold_cross_validation(model, X, y, k)
+        scores = k_fold_cross_validation(model, X, y, k_inner)
         average_score = sum(scores) / len(scores)
         results.append((hyperparameters, average_score))
 
@@ -66,27 +68,24 @@ def inner_k_fold_cross_validation(model_class, X, y, hyperparameter_grid, k=5):
     return results, best_hyperparameters, best_score
 
 
-def outer_fold_test(model_class, X, y, hyperparameter_grid, k=5):
+def outer_fold_test(model_class, X, y, hyperparameter_grid, k_outer=5, k_inner=5):
     """
-    Perform nested (outer) k-fold testing where for each outer split:
-      - split data into outer train and outer test
-      - run inner k-fold CV on the outer training set to select best hyperparameters
-      - train the chosen model on the entire outer training set
-      - evaluate on the outer test set
+    Perform nested (outer) k-fold testing.
 
     Parameters:
     model_class: The class of the machine learning model to be evaluated.
     X: The feature dataset (numpy array or pandas DataFrame).
     y: The target labels (numpy array or pandas Series).
     hyperparameter_grid: A list of dictionaries containing hyperparameter combinations.
-    k: The number of folds for both outer and inner cross-validation (default is 5).
+    k_outer: The number of outer folds.
+    k_inner: The number of inner folds used inside each outer split.
 
     Returns:
     A tuple containing:
       - outer_test_scores: list of evaluation scores (accuracy) for each outer fold
       - selected_hyperparameters: list of best hyperparameter dicts chosen for each outer fold
     """
-    outer_kf = KFold(n_splits=k, shuffle=True, random_state=42)
+    outer_kf = KFold(n_splits=k_outer, shuffle=True, random_state=42)
     outer_test_scores = []
     selected_hyperparameters = []
 
@@ -96,7 +95,7 @@ def outer_fold_test(model_class, X, y, hyperparameter_grid, k=5):
 
         # run inner CV only on the outer training set to get hyperparameter evaluations and best combo
         inner_results, best_hyperparameters, _ = inner_k_fold_cross_validation(
-            model_class, X_train_outer, y_train_outer, hyperparameter_grid, k
+            model_class, X_train_outer, y_train_outer, hyperparameter_grid, k_inner
         )
 
         # train the model with the selected hyperparameters on the full outer training set
@@ -114,7 +113,7 @@ def outer_fold_test(model_class, X, y, hyperparameter_grid, k=5):
 
 
 
-def k_fold_n_models(models, X, y, k=5):
+def k_fold_n_models(models, X, y, k_outer=5, k_inner=5):
     """
     Perform nested outer evaluation for multiple models.
 
@@ -125,13 +124,8 @@ def k_fold_n_models(models, X, y, k=5):
             - hyperparameter_grid: list of dicts with hyperparameter combinations for inner CV
     X: The feature dataset (numpy array or pandas DataFrame).
     y: The target labels (numpy array or pandas Series).
-    k: The number of folds for cross-validation (default is 5).
-
-    Returns:
-    A dictionary mapping model_name to a dict with keys:
-      - 'avg_score': average outer test score (float) or None if no outer scores
-      - 'outer_test_scores': list of scores from outer_fold_test
-      - 'selected_hyperparameters': list of best hyperparameter dicts chosen for each outer fold
+    k_outer: number of outer folds
+    k_inner: number of inner folds
     """
     results = {}
 
@@ -141,15 +135,22 @@ def k_fold_n_models(models, X, y, k=5):
 
         # run nested outer evaluation for this model using the provided hyperparameter grid
         outer_test_scores, selected_hyperparameters = outer_fold_test(
-            model_class, X, y, hyperparameter_grid, k
+            model_class, X, y, hyperparameter_grid, k_outer, k_inner
         )
 
         avg_score = None
+        variance = None
         if outer_test_scores:
             avg_score = sum(outer_test_scores) / len(outer_test_scores)
+            # population variance; returns 0.0 for single-value lists
+            try:
+                variance = statistics.pvariance(outer_test_scores)
+            except Exception:
+                variance = None
 
         results[model_name] = {
             'avg_score': avg_score,
+            'variance': variance,
             'outer_test_scores': outer_test_scores,
             'selected_hyperparameters': selected_hyperparameters
         }
@@ -157,23 +158,19 @@ def k_fold_n_models(models, X, y, k=5):
     return results
 
 
-def find_best_model(models, X, y, k=5):
+def find_best_model(models, X, y, k_outer=5, k_inner=5):
     """
     Perform nested outer evaluation for multiple models.
 
     Parameters:
     models: A list of tuples (model_name, model_class, hyperparameter_grid).
-            - model_name: string identifier
-            - model_class: class (not instance) of the model to instantiate
-            - hyperparameter_grid: list of dicts with hyperparameter combinations for inner CV
-    X: The feature dataset (numpy array or pandas DataFrame).
-    y: The target labels (numpy array or pandas Series).
-    k: The number of folds for cross-validation (default is 5).
+    k_outer: number of outer folds
+    k_inner: number of inner folds
 
     Returns:
     model with best outer average score and its hyperparameters
     """
-    results = k_fold_n_models(models, X, y, k)
+    results = k_fold_n_models(models, X, y, k_outer, k_inner)
 
     best_model_name = None
     best_avg_score = -float('inf')
@@ -188,40 +185,66 @@ def find_best_model(models, X, y, k=5):
 
     return best_model_name, best_avg_score, best_hyperparameters
 
-def main(models, X_train, y_train, X_test, k=5):
+def main(models, X_train, y_train, X_test=None, k_outer=5, k_inner=5):
     """
-    Perform nested outer evaluation for multiple models.
+    Perform nested outer evaluation for multiple models and return summary stats and predictions.
 
-    Parameters:
-    models: A list of tuples (model_name, model_class, hyperparameter_grid).
-            - model_name: string identifier
-            - model_class: class (not instance) of the model to instantiate
-            - hyperparameter_grid: list of dicts with hyperparameter combinations for inner CV
-    X: The feature dataset (numpy array or pandas DataFrame).
-    y: The target labels (numpy array or pandas Series).
-    k: The number of folds for cross-validation (default is 5).
-
-    Returns:
-    finds the best model best on the training data and then runs it on the unlabled test data and returns the predictions
+    Returns a tuple:
+      - best_model_name: name of the model with highest average outer score
+      - results: dict mapping model_name -> {
+            'avg_score': float or None,
+            'variance': float or None,
+            'selected_hyperparameters': list of hyperparameter dicts chosen per outer fold,
+            'outer_test_scores': list of outer fold scores
+        }
+      - predictions: predictions on X_test produced by the best model trained on full training data
+                     (None if X_test is None)
     """
-    best_model_name, best_avg_score, best_hyperparameters = find_best_model(models, X_train, y_train, k)
+    # obtain per-model nested CV results
+    results = k_fold_n_models(models, X_train, y_train, k_outer, k_inner)
 
-    # instantiate the best model with the best hyperparameters
+    # determine best model by avg_score
+    best_model_name = None
+    best_avg = -float('inf')
+    for name, res in results.items():
+        avg = res['avg_score']
+        if avg is not None and avg > best_avg:
+            best_avg = avg
+            best_model_name = name
+
+    # find the class and per-fold hyperparameters for the best model
     best_model_class = None
+    best_selected_hyperparams = []
     for model_entry in models:
         if model_entry[0] == best_model_name:
             best_model_class = model_entry[1]
+            # if results contain selected_hyperparameters, use those
+            best_selected_hyperparams = results.get(best_model_name, {}).get('selected_hyperparameters', []) or []
             break
 
-    if best_model_class is None:
-        raise ValueError("Best model class not found in the provided models list.")
+    # choose final hyperparameters for training on full training data:
+    # use the most common hyperparameter dict across outer folds (mode).
+    final_hyperparams = {}
+    if best_selected_hyperparams:
+        # convert dicts to hashable tuples for counting
+        tuples = [tuple(sorted(d.items())) for d in best_selected_hyperparams]
+        most_common_tuple, _ = Counter(tuples).most_common(1)[0]
+        final_hyperparams = dict(most_common_tuple)
 
-    best_model = best_model_class(**best_hyperparameters[0])  # use the first set of hyperparameters from the list
-    best_model.fit(X_train, y_train)
-    predictions = best_model.predict(X_test)
+    # train best model on full training data and predict on X_test (if provided)
+    predictions = None
+    if best_model_class is not None:
+        try:
+            model_instance = best_model_class(**final_hyperparams) if final_hyperparams else best_model_class()
+            model_instance.fit(X_train, y_train)
+            if X_test is not None:
+                predictions = model_instance.predict(X_test)
+        except Exception:
+            # if instantiation/training fails, keep predictions as None
+            predictions = None
 
-    return predictions
-
+    return best_model_name, results, predictions
 
 if __name__ == "__main__":
-    predictions = main()
+    # avoid calling main() without arguments
+    pass
