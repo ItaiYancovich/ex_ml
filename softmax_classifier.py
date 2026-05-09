@@ -1,28 +1,10 @@
-import matplotlib.pyplot as plt
 import numpy as np
 from sklearn.model_selection import train_test_split
 
 from preprocess_faces import prepare_dataset
 
 
-# ---------------------------------------------------------------------------
-# Softmax Regression
-# ---------------------------------------------------------------------------
-
 class SoftmaxRegression:
-    """
-    Multi-class logistic (softmax) regression trained with mini-batch
-    gradient descent and L2 regularisation.
-
-    Parameters
-    ----------
-    lr          : learning rate
-    reg         : L2 regularisation strength (lambda)
-    max_iter    : number of full passes over the training set (epochs)
-    batch_size  : mini-batch size  (None → full-batch gradient descent)
-    random_state: seed for weight initialisation and batch shuffling
-    """
-
     def __init__(
         self,
         lr=0.01,
@@ -31,14 +13,14 @@ class SoftmaxRegression:
         batch_size=64,
         random_state=42,
     ):
-        self.lr           = lr
-        self.reg          = reg
-        self.max_iter     = max_iter
-        self.batch_size   = batch_size
+        self.lr = lr
+        self.reg = reg
+        self.max_iter = max_iter
+        self.batch_size = batch_size
         self.random_state = random_state
 
-        self.W      = None   # (n_features, n_classes)
-        self.b      = None   # (n_classes,)
+        self.W = None
+        self.b = None
         self.classes_ = None
 
     @staticmethod
@@ -49,23 +31,19 @@ class SoftmaxRegression:
 
     @staticmethod
     def _one_hot(y, n_classes):
-        """Convert integer label vector to one-hot matrix."""
         n = len(y)
         Y = np.zeros((n, n_classes), dtype=np.float64)
         Y[np.arange(n), y] = 1.0
         return Y
 
     def _cross_entropy_loss(self, P, Y_oh):
-        """Mean cross-entropy + L2 penalty on W (not on bias)."""
         n = Y_oh.shape[0]
-        # Clip to avoid log(0)
         log_likelihood = -np.sum(Y_oh * np.log(np.clip(P, 1e-15, 1.0))) / n
-        l2_penalty     = 0.5 * self.reg * np.sum(self.W ** 2)
+        l2_penalty = 0.5 * self.reg * np.sum(self.W ** 2)
         return log_likelihood + l2_penalty
 
 
     def fit(self, X, y, X_val=None, y_val=None, verbose=False):
-        """Train on (X, y).  y must be integer class labels 0..K-1."""
         rng = np.random.default_rng(self.random_state)
         self.val_acc_history_ = []
 
@@ -73,34 +51,31 @@ class SoftmaxRegression:
         self.classes_ = np.unique(y)
         n_classes = len(self.classes_)
 
-        # Map labels to 0..K-1
         label_to_idx = {lbl: i for i, lbl in enumerate(self.classes_)}
-        y_idx        = np.array([label_to_idx[lbl] for lbl in y])
+        y_idx = np.array([label_to_idx[lbl] for lbl in y])
 
-        # Xavier / Glorot initialisation
-        scale   = np.sqrt(2.0 / (n_features + n_classes))
-        self.W  = rng.normal(0.0, scale, (n_features, n_classes))
-        self.b  = np.zeros(n_classes)
+        scale = np.sqrt(2.0 / (n_features + n_classes))
+        self.W = rng.normal(0.0, scale, (n_features, n_classes))
+        self.b = np.zeros(n_classes)
 
         bs = self.batch_size if self.batch_size is not None else n_samples
 
         for epoch in range(self.max_iter):
-            # Shuffle training set each epoch
             perm = rng.permutation(n_samples)
             X_s, y_s = X[perm], y_idx[perm]
 
             for start in range(0, n_samples, bs):
-                Xb = X_s[start : start + bs]        # (B, d)
-                yb = y_s[start : start + bs]        # (B,)
+                Xb = X_s[start : start + bs]
+                yb = y_s[start : start + bs]
 
-                B   = Xb.shape[0]
-                Z   = Xb @ self.W + self.b           # (B, K)
-                P   = self._softmax(Z)               # (B, K)
-                Y_oh = self._one_hot(yb, n_classes)  # (B, K)
+                B = Xb.shape[0]
+                Z = Xb @ self.W + self.b
+                P = self._softmax(Z)
+                Y_oh = self._one_hot(yb, n_classes)
 
-                dZ   = (P - Y_oh) / B               # (B, K)
-                dW   = Xb.T @ dZ + self.reg * self.W # (d, K)
-                db   = dZ.sum(axis=0)               # (K,)
+                dZ = (P - Y_oh) / B
+                dW = Xb.T @ dZ + self.reg * self.W
+                db = dZ.sum(axis=0)
 
                 self.W -= self.lr * dW
                 self.b -= self.lr * db
@@ -111,20 +86,18 @@ class SoftmaxRegression:
             if verbose and (epoch + 1) % 50 == 0:
                 Z_full = X @ self.W + self.b
                 P_full = self._softmax(Z_full)
-                loss   = self._cross_entropy_loss(P_full, self._one_hot(y_idx, n_classes))
+                loss = self._cross_entropy_loss(P_full, self._one_hot(y_idx, n_classes))
                 print(f"  epoch {epoch + 1:>4}/{self.max_iter}  loss={loss:.4f}")
 
         return self
 
     def predict_proba(self, X):
-        """Return softmax probability matrix of shape (n_samples, n_classes)."""
         Z = X @ self.W + self.b
         return self._softmax(Z)
 
     def predict(self, X):
-        """Return predicted integer class labels."""
-        proba      = self.predict_proba(X)
-        idx        = proba.argmax(axis=1)
+        proba = self.predict_proba(X)
+        idx = proba.argmax(axis=1)
         return self.classes_[idx]
 
 
@@ -135,7 +108,7 @@ def accuracy(y_true, y_pred):
 
 def classification_report(y_true, y_pred):
     labels = np.unique(y_true)
-    lines  = [f"{'Person':>8}  {'Prec':>6}  {'Rec':>6}  {'F1':>6}  {'Support':>8}"]
+    lines = [f"{'Person':>8}  {'Prec':>6}  {'Rec':>6}  {'F1':>6}  {'Support':>8}"]
     lines.append("-" * 46)
     macro_p, macro_r, macro_f = [], [], []
 
@@ -146,8 +119,8 @@ def classification_report(y_true, y_pred):
         support = (y_true == lbl).sum()
 
         prec = tp / (tp + fp) if (tp + fp) > 0 else 0.0
-        rec  = tp / (tp + fn) if (tp + fn) > 0 else 0.0
-        f1   = 2 * prec * rec / (prec + rec) if (prec + rec) > 0 else 0.0
+        rec = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+        f1 = 2 * prec * rec / (prec + rec) if (prec + rec) > 0 else 0.0
 
         macro_p.append(prec)
         macro_r.append(rec)
@@ -162,26 +135,18 @@ def classification_report(y_true, y_pred):
     return "\n".join(lines)
 
 
-# ---------------------------------------------------------------------------
-# Main
-# ---------------------------------------------------------------------------
-
 if __name__ == "__main__":
     X, y, _ = prepare_dataset(
         folder="Train Set (Labeled)",
         fit_limit=800,
-        n_components=123,
+        n_components=225,
     )
 
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
     print(f"\nTrain: {X_train.shape[0]}  |  Test: {X_test.shape[0]}"
           f"  |  Classes: {np.unique(y).size}  |  Features: {X.shape[1]}\n")
 
-    # -----------------------------------------------------------------------
-    # Hyperparameter grid
-    # -----------------------------------------------------------------------
     configs = [
-        # lr       reg      max_iter  batch_size
         (0.1,    1e-4,   1000,   64),
         (0.1,    1e-3,   1000,   64),
         (0.1,    1e-2,   1000,   64),
@@ -190,7 +155,7 @@ if __name__ == "__main__":
         (0.01,   1e-4,   1000,   64),
         (0.01,   1e-3,   1000,   64),
         (0.1,    1e-4,   1000,  128),
-        (0.1,    1e-4,   1000,  None),   # full-batch
+        (0.1,    1e-4,   1000,  None),
     ]
 
     results = []
@@ -205,13 +170,10 @@ if __name__ == "__main__":
         )
         clf.fit(X_train, y_train)
         y_pred = clf.predict(X_test)
-        acc    = accuracy(y_test, y_pred)
+        acc = accuracy(y_test, y_pred)
         results.append((acc, label, clf, y_pred))
         print(f"accuracy: {acc * 100:.2f}%")
 
-    # -----------------------------------------------------------------------
-    # Summary table
-    # -----------------------------------------------------------------------
     results.sort(key=lambda r: r[0], reverse=True)
     print("\n" + "=" * 60)
     print(f"{'Rank':<5}  {'Accuracy':>9}  Config")
@@ -221,30 +183,7 @@ if __name__ == "__main__":
         print(f"{rank:<5}  {acc * 100:>8.2f}%  {label}{marker}")
     print("=" * 60)
 
-    # -----------------------------------------------------------------------
-    # Detailed report for best config
-    # -----------------------------------------------------------------------
-    best_acc, best_label, best_clf, best_pred = results[0]
+    best_acc, best_label, _, best_pred = results[0]
     print(f"\n=== Detailed report for best config: {best_label} ===\n")
     print(classification_report(y_test, best_pred))
     print(f"\nOverall accuracy: {best_acc * 100:.2f}%")
-
-    # -----------------------------------------------------------------------
-    # Plot test accuracy vs epochs for the best config
-    # -----------------------------------------------------------------------
-    print("\nRecording per-epoch test accuracy for best config...")
-    clf_plot = SoftmaxRegression(
-        lr=best_clf.lr, reg=best_clf.reg, max_iter=best_clf.max_iter,
-        batch_size=best_clf.batch_size, random_state=42,
-    )
-    clf_plot.fit(X_train, y_train, X_val=X_test, y_val=y_test)
-
-    epochs = range(1, best_clf.max_iter + 1)
-    plt.figure(figsize=(9, 5))
-    plt.plot(epochs, [v * 100 for v in clf_plot.val_acc_history_], linewidth=1.5)
-    plt.xlabel("Epoch")
-    plt.ylabel("Test Accuracy (%)")
-    plt.title(f"Test Accuracy vs Epochs\n{best_label}")
-    plt.grid(True, alpha=0.4)
-    plt.tight_layout()
-    plt.show()

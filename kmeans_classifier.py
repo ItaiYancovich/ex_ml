@@ -1,12 +1,9 @@
 import numpy as np
-import os
-import glob
-import matplotlib.pyplot as plt
 from scipy.optimize import linear_sum_assignment
 from sklearn.metrics import adjusted_rand_score, normalized_mutual_info_score
 from sklearn.model_selection import train_test_split
 
-from preprocess_faces import prepare_dataset, natural_key, load_gray_image
+from preprocess_faces import prepare_dataset
 
 
 class KMeansCustom:
@@ -92,76 +89,6 @@ def mapped_accuracy(y_true, y_pred_cluster, label_map):
     return (y_true == y_pred).mean()
 
 
-def show_cluster_examples(X_train, y_train, train_clusters, idx_train, image_paths, centroids, n_groups=4, n_per_group=5):
-    cluster_ids, counts = np.unique(train_clusters, return_counts=True)
-    order = np.argsort(counts)[::-1]
-    selected_clusters = cluster_ids[order[:n_groups]]
-
-    fig, axes = plt.subplots(
-        len(selected_clusters),
-        n_per_group + 1,
-        figsize=(2.2 * (n_per_group + 1), 2.3 * len(selected_clusters)),
-        gridspec_kw={"width_ratios": [2.6] + [1] * n_per_group},
-    )
-
-    if len(selected_clusters) == 1:
-        axes = axes[np.newaxis, :]
-
-    fig.patch.set_facecolor("white")
-
-    # Column headers for image cells
-    for col in range(1, n_per_group + 1):
-        axes[0, col].set_title(f"Example {col}", fontsize=10, pad=8)
-
-    for row, cluster_id in enumerate(selected_clusters):
-        members = np.where(train_clusters == cluster_id)[0]
-        centroid = centroids[int(cluster_id)]
-        dists = ((X_train[members] - centroid) ** 2).sum(axis=1)
-        nearest_local = members[np.argsort(dists)[:n_per_group]]
-
-        # Row header cell (table-style)
-        header_ax = axes[row, 0]
-        header_ax.axis("off")
-        header_text = (
-            f"Cluster c{int(cluster_id)}\n"
-            f"size: {len(members)}"
-        )
-        header_ax.text(
-            0.03,
-            0.5,
-            header_text,
-            ha="left",
-            va="center",
-            fontsize=10,
-            bbox={"boxstyle": "round,pad=0.45", "facecolor": "#f3f4f6", "edgecolor": "#d1d5db"},
-        )
-
-        for col in range(n_per_group):
-            ax = axes[row, col + 1]
-            ax.axis("off")
-            if col >= len(nearest_local):
-                continue
-
-            sample_local_idx = nearest_local[col]
-            global_idx = idx_train[sample_local_idx]
-            img = load_gray_image(image_paths[global_idx])
-            ax.imshow(img, cmap="gray")
-            ax.set_title(f"p{int(y_train[sample_local_idx])}", fontsize=9, pad=4)
-
-            # Draw soft cell border to emphasize table structure
-            for spine in ax.spines.values():
-                spine.set_visible(True)
-                spine.set_linewidth(0.8)
-                spine.set_edgecolor("#d1d5db")
-
-    fig.suptitle("K-Means Cluster Table: Nearest Training Images per Cluster", fontsize=13)
-    fig.tight_layout(rect=[0, 0, 1, 0.94], w_pad=1.0, h_pad=1.1)
-    out_path = "kmeans_cluster_examples.png"
-    fig.savefig(out_path, dpi=150)
-    plt.close(fig)
-    return out_path
-
-
 if __name__ == "__main__":
     X, y, _ = prepare_dataset(
         folder="Train Set (Labeled)",
@@ -169,11 +96,8 @@ if __name__ == "__main__":
         n_components=100,
     )
 
-    image_paths = sorted(glob.glob(os.path.join("Train Set (Labeled)", "*.pgm")), key=natural_key)
-    all_indices = np.arange(X.shape[0])
-
-    X_train, X_test, y_train, y_test, idx_train, _ = train_test_split(
-        X, y, all_indices, test_size=0.2, random_state=42, stratify=y
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=0.2, random_state=42, stratify=y
     )
 
     print(f"Train: {X_train.shape[0]}  |  Test: {X_test.shape[0]}  |  Features: {X.shape[1]}")
@@ -204,14 +128,3 @@ if __name__ == "__main__":
     print(f"Train NMI: {train_nmi:.4f}  |  Test NMI: {test_nmi:.4f}")
     print("=" * 60)
 
-    image_out = show_cluster_examples(
-        X_train,
-        y_train,
-        train_clusters,
-        idx_train,
-        image_paths,
-        kmeans.centroids_,
-        n_groups=4,
-        n_per_group=5,
-    )
-    print(f"Saved cluster image grid to: {image_out}")

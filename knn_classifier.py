@@ -4,13 +4,7 @@ from sklearn.model_selection import train_test_split
 from preprocess_faces import prepare_dataset
 
 
-# ---------------------------------------------------------------------------
-# KNN
-# ---------------------------------------------------------------------------
-
 class KNNClassifier:
-    """sklearn-compatible wrapper around knn_predict."""
-
     def __init__(self, k=5, p=2):
         self.k = k
         self.p = p
@@ -25,35 +19,23 @@ class KNNClassifier:
 
 
 def knn_predict(X_train, y_train, X_test, k=5, p=2):
-    """
-    Predict labels for X_test using k-nearest neighbours.
-    Distance metric: Minkowski with exponent p (p=1: L1, p=2: L2, p=3: L3).
-    Computed in batches to avoid materialising the full n_test×n_train matrix.
-    Returns predicted label array of length n_test.
-    """
-    n_test  = X_test.shape[0]
+    n_test = X_test.shape[0]
     n_train = X_train.shape[0]
     predictions = np.empty(n_test, dtype=y_train.dtype)
 
-    batch = max(1, 512 * 512 // max(n_train, 1))   # keep memory reasonable
-
-    # Pre-compute train norms for the fast L2 path
+    batch = max(1, 512 * 512 // max(n_train, 1))
     train_sq = (X_train ** 2).sum(axis=1) if p == 2 else None
 
     for start in range(0, n_test, batch):
-        end   = min(start + batch, n_test)
-        chunk = X_test[start:end]                    # (B, d)
+        end = min(start + batch, n_test)
+        chunk = X_test[start:end]
 
         if p == 2:
-            # ||a - b||^2 = ||a||^2 - 2 a·b^T + ||b||^2
-            test_sq  = (chunk ** 2).sum(axis=1, keepdims=True)
+            test_sq = (chunk ** 2).sum(axis=1, keepdims=True)
             dists = np.maximum(test_sq - 2.0 * (chunk @ X_train.T) + train_sq, 0.0)
-            # dists holds squared L2 — order is the same so no need to sqrt
         else:
-            # General Minkowski: broadcast diff then reduce
-            # chunk[:, None, :] - X_train[None, :, :] → (B, n_train, d)
-            diff  = np.abs(chunk[:, np.newaxis, :] - X_train[np.newaxis, :, :])
-            dists = (diff ** p).sum(axis=2)          # (B, n_train), skip p-th root
+            diff = np.abs(chunk[:, np.newaxis, :] - X_train[np.newaxis, :, :])
+            dists = (diff ** p).sum(axis=2)
 
         nn_idx = np.argpartition(dists, kth=min(k, n_train - 1), axis=1)[:, :k]
 
@@ -65,17 +47,13 @@ def knn_predict(X_train, y_train, X_test, k=5, p=2):
     return predictions
 
 
-# ---------------------------------------------------------------------------
-# Evaluation helpers
-# ---------------------------------------------------------------------------
-
 def accuracy(y_true, y_pred):
     return (y_true == y_pred).mean()
 
 
 def classification_report(y_true, y_pred):
     labels = np.unique(y_true)
-    lines  = [f"{'Person':>8}  {'Prec':>6}  {'Rec':>6}  {'F1':>6}  {'Support':>8}"]
+    lines = [f"{'Person':>8}  {'Prec':>6}  {'Rec':>6}  {'F1':>6}  {'Support':>8}"]
     lines.append("-" * 46)
     macro_p, macro_r, macro_f = [], [], []
 
@@ -86,8 +64,8 @@ def classification_report(y_true, y_pred):
         support = (y_true == lbl).sum()
 
         prec = tp / (tp + fp) if (tp + fp) > 0 else 0.0
-        rec  = tp / (tp + fn) if (tp + fn) > 0 else 0.0
-        f1   = 2 * prec * rec / (prec + rec) if (prec + rec) > 0 else 0.0
+        rec = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+        f1 = 2 * prec * rec / (prec + rec) if (prec + rec) > 0 else 0.0
 
         macro_p.append(prec)
         macro_r.append(rec)
@@ -102,12 +80,7 @@ def classification_report(y_true, y_pred):
     return "\n".join(lines)
 
 
-# ---------------------------------------------------------------------------
-# Main
-# ---------------------------------------------------------------------------
-
 if __name__ == "__main__":
-    # Load (or build) the preprocessed dataset
     X, y, _ = prepare_dataset(
         folder="Train Set (Labeled)",
         fit_limit=800,
