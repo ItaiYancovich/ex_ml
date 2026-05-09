@@ -6,6 +6,36 @@ from sklearn.model_selection import train_test_split
 from preprocess_faces import prepare_dataset
 
 
+# ---------------------------------------------------------------------------
+# SVM
+# ---------------------------------------------------------------------------
+
+class SVMClassifier:
+    """sklearn-compatible wrapper around sklearn's SVC."""
+
+    def __init__(self, kernel="rbf", C=1.0, gamma="scale", class_weight="balanced", random_state=42):
+        self.kernel = kernel
+        self.C = C
+        self.gamma = gamma
+        self.class_weight = class_weight
+        self.random_state = random_state
+        self._clf = None
+
+    def fit(self, X, y):
+        self._clf = SVC(
+            kernel=self.kernel,
+            C=self.C,
+            gamma=self.gamma,
+            class_weight=self.class_weight,
+            random_state=self.random_state,
+        )
+        self._clf.fit(X, y)
+        return self
+
+    def predict(self, X):
+        return self._clf.predict(X)
+
+
 if __name__ == "__main__":
     X, y, _ = prepare_dataset(
         folder="Train Set (Labeled)",

@@ -54,12 +54,15 @@ def inner_k_fold_cross_validation(model_class, X, y, hyperparameter_grid, k_inne
     best_hyperparameters = None
     best_score = -float('inf')
     results = []
+    total = len(hyperparameter_grid)
 
-    for hyperparameters in hyperparameter_grid:
+    for i, hyperparameters in enumerate(hyperparameter_grid, 1):
+        print(f"      [HP {i}/{total}] {hyperparameters} ... ", end="", flush=True)
         model = model_class(**hyperparameters)
         scores = k_fold_cross_validation(model, X, y, k_inner)
         average_score = sum(scores) / len(scores)
         results.append((hyperparameters, average_score))
+        print(f"avg acc: {average_score * 100:.2f}%")
 
         if average_score > best_score:
             best_score = average_score
@@ -89,7 +92,8 @@ def outer_fold_test(model_class, X, y, hyperparameter_grid, k_outer=5, k_inner=5
     outer_test_scores = []
     selected_hyperparameters = []
 
-    for outer_train_idx, outer_test_idx in outer_kf.split(X):
+    for fold_idx, (outer_train_idx, outer_test_idx) in enumerate(outer_kf.split(X), 1):
+        print(f"  [Outer fold {fold_idx}/{k_outer}]", flush=True)
         X_train_outer, X_test_outer = X[outer_train_idx], X[outer_test_idx]
         y_train_outer, y_test_outer = y[outer_train_idx], y[outer_test_idx]
 
@@ -98,6 +102,8 @@ def outer_fold_test(model_class, X, y, hyperparameter_grid, k_outer=5, k_inner=5
             model_class, X_train_outer, y_train_outer, hyperparameter_grid, k_inner
         )
 
+        print(f"    Best HPs: {best_hyperparameters}")
+
         # train the model with the selected hyperparameters on the full outer training set
         best_model = model_class(**best_hyperparameters)
         best_model.fit(X_train_outer, y_train_outer)
@@ -105,6 +111,7 @@ def outer_fold_test(model_class, X, y, hyperparameter_grid, k_outer=5, k_inner=5
         # evaluate on the outer test set
         predictions = best_model.predict(X_test_outer)
         test_score = accuracy_score(y_test_outer, predictions)
+        print(f"    Outer fold score: {test_score * 100:.2f}%", flush=True)
 
         outer_test_scores.append(test_score)
         selected_hyperparameters.append(best_hyperparameters)
@@ -117,6 +124,11 @@ def k_fold_n_models(models, X, y, k_outer=5, k_inner=5):
     """
     Perform nested outer evaluation for multiple models.
 
+    The outer loop iterates over folds; within each fold all candidate models
+    are evaluated with inner CV for hyperparameter tuning, then retrained on
+    the full outer training set and scored on the outer test fold.
+    This matches the nested CV procedure described in the assignment (Part D).
+
     Parameters:
     models: A list of tuples (model_name, model_class, hyperparameter_grid).
             - model_name: string identifier
@@ -127,33 +139,54 @@ def k_fold_n_models(models, X, y, k_outer=5, k_inner=5):
     k_outer: number of outer folds
     k_inner: number of inner folds
     """
-    results = {}
+    outer_kf = KFold(n_splits=k_outer, shuffle=True, random_state=42)
 
-    for model_entry in models:
-        # expect (model_name, model_class, hyperparameter_grid)
-        model_name, model_class, hyperparameter_grid = model_entry
+    # initialise per-model storage
+    results = {
+        name: {'outer_test_scores': [], 'selected_hyperparameters': []}
+        for name, _, _ in models
+    }
 
-        # run nested outer evaluation for this model using the provided hyperparameter grid
-        outer_test_scores, selected_hyperparameters = outer_fold_test(
-            model_class, X, y, hyperparameter_grid, k_outer, k_inner
-        )
+    for fold_idx, (outer_train_idx, outer_test_idx) in enumerate(outer_kf.split(X), 1):
+        print(f"\n{'=' * 50}", flush=True)
+        print(f"[Outer fold {fold_idx}/{k_outer}]", flush=True)
+        print(f"{'=' * 50}", flush=True)
 
-        avg_score = None
-        variance = None
-        if outer_test_scores:
-            avg_score = sum(outer_test_scores) / len(outer_test_scores)
-            # population variance; returns 0.0 for single-value lists
-            try:
-                variance = statistics.pvariance(outer_test_scores)
-            except Exception:
-                variance = None
+        X_train_outer, X_test_outer = X[outer_train_idx], X[outer_test_idx]
+        y_train_outer, y_test_outer = y[outer_train_idx], y[outer_test_idx]
 
-        results[model_name] = {
-            'avg_score': avg_score,
-            'variance': variance,
-            'outer_test_scores': outer_test_scores,
-            'selected_hyperparameters': selected_hyperparameters
-        }
+        # evaluate every candidate model within this fold
+        for model_name, model_class, hyperparameter_grid in models:
+            print(f"\n  Model: {model_name}", flush=True)
+
+            # inner CV on the outer training set to select the best hyperparameters
+            _, best_hyperparameters, _ = inner_k_fold_cross_validation(
+                model_class, X_train_outer, y_train_outer, hyperparameter_grid, k_inner
+            )
+
+            print(f"    Best HPs: {best_hyperparameters}")
+
+            # retrain on the full outer training set with the selected hyperparameters
+            best_model = model_class(**best_hyperparameters)
+            best_model.fit(X_train_outer, y_train_outer)
+
+            # evaluate on the outer test fold
+            predictions = best_model.predict(X_test_outer)
+            test_score = accuracy_score(y_test_outer, predictions)
+            print(f"    Outer fold score: {test_score * 100:.2f}%", flush=True)
+
+            # store this fold's score and chosen hyperparameters for this model
+            results[model_name]['outer_test_scores'].append(test_score)
+            results[model_name]['selected_hyperparameters'].append(best_hyperparameters)
+
+    # compute summary statistics across all outer folds
+    for model_name in results:
+        scores = results[model_name]['outer_test_scores']
+        results[model_name]['avg_score'] = sum(scores) / len(scores) if scores else None
+        try:
+            results[model_name]['variance'] = statistics.pvariance(scores)
+        except Exception:
+            results[model_name]['variance'] = None
 
     return results
 

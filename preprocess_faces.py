@@ -310,7 +310,7 @@ def build_dataset(folder, pipeline_mean, pipeline_std, pca_mean, pca_components,
     return X, y
 
 
-def prepare_dataset(folder=TRAIN_FOLDER, fit_limit=800, n_components=123, cache_file="dataset_cache.npz"):
+def prepare_dataset(folder=TRAIN_FOLDER, fit_limit=800, n_components=225, cache_file="dataset_cache.npz"):
     """
     Full pipeline: load images → crop → CLAHE → HOG → scale → PCA → (X, y).
     Results and pipeline parameters are saved to *cache_file* so subsequent
@@ -414,7 +414,7 @@ def main():
     parser.add_argument("--folder", default=TRAIN_FOLDER, help="Folder containing .pgm training images.")
     parser.add_argument("--samples", type=int, default=10, help="Number of different people to show.")
     parser.add_argument("--fit-limit", type=int, default=800, help="Images used to fit scaling/PCA. Use 0 for all images.")
-    parser.add_argument("--components", type=int, default=123, help="PCA components to keep.")
+    parser.add_argument("--components", type=int, default=225, help="PCA components to keep.")
     parser.add_argument("--no-show", action="store_true", help="Run preprocessing without opening matplotlib windows.")
     args = parser.parse_args()
 

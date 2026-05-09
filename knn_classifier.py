@@ -1,40 +1,28 @@
 import numpy as np
+from sklearn.model_selection import train_test_split
 
 from preprocess_faces import prepare_dataset
 
 
 # ---------------------------------------------------------------------------
-# Train / test split
-# ---------------------------------------------------------------------------
-
-def train_test_split(X, y, test_size=0.2, random_state=42):
-    """
-    Stratified split: keeps class proportions roughly equal in both sets.
-    Returns X_train, X_test, y_train, y_test.
-    """
-    rng = np.random.default_rng(random_state)
-    train_idx, test_idx = [], []
-
-    for label in np.unique(y):
-        idx = np.where(y == label)[0]
-        rng.shuffle(idx)
-        n_test = max(1, int(len(idx) * test_size))
-        test_idx.append(idx[:n_test])
-        train_idx.append(idx[n_test:])
-
-    train_idx = np.concatenate(train_idx)
-    test_idx  = np.concatenate(test_idx)
-
-    # Shuffle both sets so ordering is random
-    rng.shuffle(train_idx)
-    rng.shuffle(test_idx)
-
-    return X[train_idx], X[test_idx], y[train_idx], y[test_idx]
-
-
-# ---------------------------------------------------------------------------
 # KNN
 # ---------------------------------------------------------------------------
+
+class KNNClassifier:
+    """sklearn-compatible wrapper around knn_predict."""
+
+    def __init__(self, k=5, p=2):
+        self.k = k
+        self.p = p
+
+    def fit(self, X, y):
+        self._X_train = X
+        self._y_train = y
+        return self
+
+    def predict(self, X):
+        return knn_predict(self._X_train, self._y_train, X, k=self.k, p=self.p)
+
 
 def knn_predict(X_train, y_train, X_test, k=5, p=2):
     """
@@ -126,7 +114,7 @@ if __name__ == "__main__":
         n_components=225,
     )
 
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
     print(f"\nTrain: {X_train.shape[0]} samples  |  Test: {X_test.shape[0]} samples")
     print(f"Classes: {np.unique(y).size}  |  Features: {X.shape[1]}\n")
 
