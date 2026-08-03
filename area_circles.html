@@ -1,0 +1,1346 @@
+<title>Area circles</title>
+<style>
+  :root {
+    color-scheme: light;
+    --ground: #f7f8fa;
+    --surface: #ffffff;
+    --sunken: #eef0f4;
+    --ink: #0f1216;
+    --ink-2: #454c58;
+    --muted: #6b7382;
+    --line: #e0e4ea;
+    --line-2: #cdd3dc;
+    --accent: #2a78d6;
+    --accent-ink: #ffffff;
+    --shadow: 0 1px 2px rgba(15, 18, 22, .06), 0 8px 24px rgba(15, 18, 22, .05);
+    --font-ui: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) {
+      color-scheme: dark;
+      --ground: #111316;
+      --surface: #191c20;
+      --sunken: #14171a;
+      --ink: #f2f4f7;
+      --ink-2: #c3c9d3;
+      --muted: #939bab;
+      --line: #282c33;
+      --line-2: #363c45;
+      --accent: #3987e5;
+      --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 8px 24px rgba(0, 0, 0, .3);
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --ground: #111316;
+    --surface: #191c20;
+    --sunken: #14171a;
+    --ink: #f2f4f7;
+    --ink-2: #c3c9d3;
+    --muted: #939bab;
+    --line: #282c33;
+    --line-2: #363c45;
+    --accent: #3987e5;
+    --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 8px 24px rgba(0, 0, 0, .3);
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--font-ui);
+    font-size: 15px;
+    line-height: 1.5;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  .app {
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: 20px 16px 56px;
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+  }
+
+  /* ---- header ------------------------------------------------------- */
+  .masthead { display: flex; flex-direction: column; gap: 10px; }
+
+  h1 {
+    margin: 0;
+    font-size: 25px;
+    font-weight: 680;
+    letter-spacing: -.022em;
+    line-height: 1.15;
+    text-wrap: balance;
+  }
+
+  .lede { margin: 0; color: var(--muted); max-width: 62ch; font-size: 14px; }
+
+  .readout {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 14px;
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    font-variant-numeric: tabular-nums;
+    color: var(--muted);
+    border-top: 1px solid var(--line);
+    border-bottom: 1px solid var(--line);
+    padding: 7px 0;
+  }
+  .readout b { color: var(--ink-2); font-weight: 600; }
+  .readout .working { color: var(--accent); }
+
+  /* ---- layout ------------------------------------------------------- */
+  .work { display: flex; flex-direction: column; gap: 18px; }
+
+  @media (min-width: 900px) {
+    .work { display: grid; grid-template-columns: minmax(0, 1fr) 336px; gap: 24px; align-items: start; }
+    .panel { position: sticky; top: 20px; }
+  }
+
+  /* ---- chart -------------------------------------------------------- */
+  .stage {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    box-shadow: var(--shadow);
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    min-width: 0;
+  }
+
+  #chart { width: 100%; display: block; }
+  #chart svg { width: 100%; height: auto; display: block; }
+  #legend:empty { display: none; }
+  @media (prefers-reduced-motion: no-preference) {
+    #chart .cells { animation: settle .34s cubic-bezier(.2, .7, .3, 1); transform-origin: center; }
+    @keyframes settle { from { opacity: 0; transform: scale(.985); } }
+  }
+
+  .caption {
+    font-size: 11.5px;
+    color: var(--muted);
+    font-family: var(--font-mono);
+    line-height: 1.45;
+    margin: 0;
+  }
+  .caption:empty { display: none; }
+  .caption details { display: inline; }
+  .caption summary { cursor: pointer; color: var(--ink-2); }
+
+  /* a cell too small for a label is still identifiable: tap or hover it */
+  #tip {
+    position: fixed;
+    z-index: 20;
+    pointer-events: none;
+    background: var(--surface);
+    border: 1px solid var(--line-2);
+    border-radius: 7px;
+    box-shadow: var(--shadow);
+    padding: 7px 10px;
+    font-size: 12.5px;
+    line-height: 1.35;
+    max-width: 220px;
+    transform: translate(-50%, -100%);
+  }
+  #tip[hidden] { display: none; }
+  #tip .swatch { width: 9px; height: 9px; border-radius: 50%; display: inline-block; margin-right: 6px; }
+  #tip .name { color: var(--ink); font-weight: 600; }
+  #tip .num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; color: var(--ink-2); }
+  #chart path { cursor: default; }
+
+  .empty {
+    aspect-ratio: 1;
+    display: grid;
+    place-content: center;
+    text-align: center;
+    color: var(--muted);
+    font-size: 14px;
+    padding: 24px;
+  }
+
+  /* ---- controls ----------------------------------------------------- */
+  .controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+
+  .seg {
+    display: inline-flex;
+    background: var(--sunken);
+    border: 1px solid var(--line);
+    border-radius: 7px;
+    padding: 2px;
+    gap: 2px;
+  }
+  .seg button {
+    appearance: none;
+    border: 0;
+    background: transparent;
+    color: var(--ink-2);
+    font: inherit;
+    font-size: 12.5px;
+    padding: 5px 11px;
+    border-radius: 5px;
+    cursor: pointer;
+  }
+  .seg button[aria-pressed="true"] { background: var(--surface); color: var(--ink); box-shadow: 0 1px 2px rgba(0, 0, 0, .12); }
+  .seg button[disabled] { opacity: .4; cursor: not-allowed; }
+
+  .btn {
+    appearance: none;
+    font: inherit;
+    font-size: 12.5px;
+    padding: 6px 12px;
+    border-radius: 7px;
+    border: 1px solid var(--line-2);
+    background: var(--surface);
+    color: var(--ink-2);
+    cursor: pointer;
+  }
+  .btn:hover { border-color: var(--muted); color: var(--ink); }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+  .btn.primary:hover { filter: brightness(1.06); }
+
+  .check {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12.5px;
+    color: var(--ink-2);
+    cursor: pointer;
+    user-select: none;
+  }
+  .check input { accent-color: var(--accent); margin: 0; }
+
+  :is(button, textarea, input, .check):focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+
+  /* ---- panel -------------------------------------------------------- */
+  .panel {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    box-shadow: var(--shadow);
+    padding: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .field { display: flex; flex-direction: column; gap: 6px; }
+  .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+
+  label.tag {
+    font-size: 11px;
+    letter-spacing: .07em;
+    text-transform: uppercase;
+    color: var(--muted);
+    font-weight: 600;
+  }
+
+  input[type="text"], textarea {
+    width: 100%;
+    background: var(--sunken);
+    border: 1px solid var(--line);
+    border-radius: 7px;
+    color: var(--ink);
+    font-family: var(--font-mono);
+    font-size: 13px;
+    font-variant-numeric: tabular-nums;
+    padding: 9px 10px;
+    resize: vertical;
+  }
+  textarea { min-height: 210px; line-height: 1.55; }
+  input[type="text"] { font-family: var(--font-ui); font-size: 14px; }
+
+  .hint { font-size: 12px; color: var(--muted); margin: 0; }
+  .hint code {
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    background: var(--sunken);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 1px 4px;
+  }
+  .warn { color: #c2410c; }
+  :root[data-theme="dark"] .warn, :root:where(:not([data-theme="light"])) .warn { color: #f0a068; }
+  @media (prefers-color-scheme: light) { :root:where(:not([data-theme="dark"])) .warn { color: #c2410c; } }
+
+  footer {
+    color: var(--muted);
+    font-size: 12px;
+    border-top: 1px solid var(--line);
+    padding-top: 12px;
+    max-width: 68ch;
+  }
+  footer p { margin: 0 0 6px; }
+  footer code { font-family: var(--font-mono); font-size: 11.5px; }
+</style>
+
+<div class="app">
+  <header class="masthead">
+    <h1>Area circles</h1>
+    <p class="lede">
+      Type numbers, get a circle cut into polygons whose areas are proportional to them.
+      Each cell's area is solved to within a fraction of a percent, not eyeballed.
+    </p>
+    <div class="readout" id="readout" aria-live="polite"></div>
+  </header>
+
+  <div class="work">
+    <section class="stage">
+      <div id="chart"></div>
+      <div id="tip" hidden></div>
+      <div id="legend"></div>
+      <p class="caption" id="caption"></p>
+      <div class="controls">
+        <div class="seg" role="group" aria-label="Colour">
+          <button type="button" data-color="value" aria-pressed="true">Ramp</button>
+          <button type="button" data-color="group" aria-pressed="false">Group</button>
+          <button type="button" data-color="single" aria-pressed="false">One</button>
+        </div>
+        <label class="check"><input type="checkbox" id="pct"> Percent</label>
+        <label class="check"><input type="checkbox" id="names" checked> Names</label>
+        <button type="button" class="btn" id="shuffle">Shuffle</button>
+        <button type="button" class="btn primary" id="download">Download PNG</button>
+      </div>
+    </section>
+
+    <aside class="panel">
+      <div class="field">
+        <label class="tag" for="title">Title</label>
+        <input type="text" id="title" value="The world's largest agricultural economies"
+               placeholder="Optional" autocomplete="off" spellcheck="false">
+      </div>
+      <div class="row2">
+        <div class="field">
+          <label class="tag" for="prefix">Before the number</label>
+          <input type="text" id="prefix" value="$" placeholder="$" autocomplete="off" spellcheck="false">
+        </div>
+        <div class="field">
+          <label class="tag" for="suffix">After it</label>
+          <input type="text" id="suffix" value="B" placeholder="kg" autocomplete="off" spellcheck="false">
+        </div>
+      </div>
+      <div class="field">
+        <label class="tag" for="data">Your numbers</label>
+        <textarea id="data" spellcheck="false" autocapitalize="off" autocorrect="off"></textarea>
+        <p class="hint">
+          One per line. <code>5</code> · <code>Rent, 60</code> · <code>Brazil, 204, Americas</code>.
+          A line of plain numbers like <code>5 3 2 8 1</code> works too.
+        </p>
+        <p class="hint warn" id="parse-warn"></p>
+      </div>
+    </aside>
+  </div>
+
+  <footer>
+    <p>
+      The layout is a weighted (power) Voronoi treemap, after Nocaj &amp; Brandes,
+      <em>Computing Voronoi Treemaps</em> (2012): build the power diagram, slide each cell's
+      site to its centroid, then Newton-step the weights until every area matches its
+      target. Area is the quantity — colour and the printed number say the same thing again,
+      so nothing rests on colour alone.
+    </p>
+    <p>
+      Ported from the Python version in <code>ex_ml</code> (<code>voronoi_treemap.py</code>,
+      <code>circle_area_chart.py</code>), which produces the same layout offline.
+    </p>
+  </footer>
+</div>
+
+<script type="module">
+"use strict";
+
+/* ==================================================================== *
+ * 1. Geometry: power (additively weighted Voronoi) diagram in a circle
+ * ==================================================================== */
+
+const TAU = Math.PI * 2;
+
+/** Circle as a polygon, scaled so its area is exactly the circle's. */
+function circleBoundary(segments = 256) {
+  const r = 1 / Math.sqrt((Math.sin(TAU / segments) * segments) / TAU);
+  const v = new Float64Array(segments * 2);
+  for (let i = 0; i < segments; i++) {
+    const t = (TAU * i) / segments;
+    v[2 * i] = r * Math.cos(t);
+    v[2 * i + 1] = r * Math.sin(t);
+  }
+  return v;
+}
+
+function polyArea(v) {
+  const n = v.length / 2;
+  if (n < 3) return 0;
+  let a = 0;
+  for (let i = 0; i < n; i++) {
+    const j = (i + 1) % n;
+    a += v[2 * i] * v[2 * j + 1] - v[2 * j] * v[2 * i + 1];
+  }
+  return a / 2;
+}
+
+function polyCentroid(v) {
+  const n = v.length / 2;
+  if (n < 3) return [0, 0];
+  let a = 0, cx = 0, cy = 0;
+  for (let i = 0; i < n; i++) {
+    const j = (i + 1) % n;
+    const cross = v[2 * i] * v[2 * j + 1] - v[2 * j] * v[2 * i + 1];
+    a += cross;
+    cx += (v[2 * i] + v[2 * j]) * cross;
+    cy += (v[2 * i + 1] + v[2 * j + 1]) * cross;
+  }
+  if (Math.abs(a) < 1e-18) return [v[0], v[1]];
+  return [cx / (3 * a), cy / (3 * a)];
+}
+
+const EMPTY_V = new Float64Array(0);
+const EMPTY_O = new Int32Array(0);
+
+/**
+ * Clip a convex polygon by the half-plane n.x <= offset (Sutherland-Hodgman).
+ * `owners[k]` labels edge k -> k+1 with the site that created it (-1 = rim),
+ * which is what makes the exact Newton step on the weights possible.
+ */
+function clipHalfplane(v, owners, nx, ny, offset, ownerId) {
+  const n = v.length / 2;
+  if (n === 0) return [v, owners];
+  const d = new Float64Array(n);
+  let allIn = true, anyIn = false;
+  for (let i = 0; i < n; i++) {
+    d[i] = v[2 * i] * nx + v[2 * i + 1] * ny - offset;
+    if (d[i] <= 0) anyIn = true; else allIn = false;
+  }
+  if (allIn) return [v, owners];
+  if (!anyIn) return [EMPTY_V, EMPTY_O];
+
+  const ov = [], oo = [];
+  for (let i = 0; i < n; i++) {
+    const j = (i + 1) % n;
+    const inI = d[i] <= 0, inJ = d[j] <= 0;
+    if (inI) { ov.push(v[2 * i], v[2 * i + 1]); oo.push(owners[i]); }
+    if (inI !== inJ) {
+      const t = d[i] / (d[i] - d[j]);
+      ov.push(v[2 * i] + t * (v[2 * j] - v[2 * i]),
+              v[2 * i + 1] + t * (v[2 * j + 1] - v[2 * i + 1]));
+      // leaving the half-plane starts an edge along the cut; entering keeps
+      // the edge it came in on
+      oo.push(inI ? ownerId : owners[i]);
+    }
+  }
+  return [Float64Array.from(ov), Int32Array.from(oo)];
+}
+
+function maxRadius(v, cx, cy) {
+  let m = 0;
+  for (let i = 0; i < v.length; i += 2) {
+    const dx = v[i] - cx, dy = v[i + 1] - cy;
+    const d = dx * dx + dy * dy;
+    if (d > m) m = d;
+  }
+  return Math.sqrt(m);
+}
+
+/** Power diagram of (sites, weights), clipped to `boundary`. */
+function powerCells(sx, sy, w, boundary) {
+  const n = sx.length;
+  const rim = new Int32Array(boundary.length / 2).fill(-1);
+  const reach = new Float64Array(n);
+  const order = new Int32Array(n);
+  const cells = [];
+
+  for (let i = 0; i < n; i++) {
+    for (let j = 0; j < n; j++) {
+      if (j === i) { reach[j] = Infinity; order[j] = j; continue; }
+      const dx = sx[j] - sx[i], dy = sy[j] - sy[i];
+      const d2 = dx * dx + dy * dy;
+      // signed distance from site i to its bisector with j
+      reach[j] = (d2 + w[i] - w[j]) / (2 * Math.sqrt(d2));
+      order[j] = j;
+    }
+    const idx = Array.from(order).sort((a, b) => reach[a] - reach[b]);
+
+    let v = boundary, own = rim;
+    let rmax = maxRadius(v, sx[i], sy[i]);
+    const sqi = sx[i] * sx[i] + sy[i] * sy[i];
+    for (const j of idx) {
+      if (reach[j] > rmax) break;  // this cut, and every later one, misses
+      const nx = 2 * (sx[j] - sx[i]), ny = 2 * (sy[j] - sy[i]);
+      const off = sx[j] * sx[j] + sy[j] * sy[j] - sqi - w[j] + w[i];
+      [v, own] = clipHalfplane(v, own, nx, ny, off, j);
+      if (v.length < 6) { v = EMPTY_V; own = EMPTY_O; break; }
+      rmax = maxRadius(v, sx[i], sy[i]);
+    }
+    cells.push({ v, own });
+  }
+  return cells;
+}
+
+/** Deterministic PRNG so a given seed always gives the same layout. */
+function rng(seed) {
+  let s = (seed >>> 0) || 1;
+  return () => {
+    s ^= s << 13; s >>>= 0;
+    s ^= s >> 17;
+    s ^= s << 5; s >>>= 0;
+    return s / 4294967296;
+  };
+}
+
+/** Sunflower spiral, biggest value nearest the middle. */
+function initialSites(values, rand) {
+  const n = values.length;
+  const golden = Math.PI * (3 - Math.sqrt(5));
+  const phase = rand() * TAU;
+  const sx = new Float64Array(n), sy = new Float64Array(n);
+  const byValue = Array.from(values.keys()).sort((a, b) => values[b] - values[a]);
+  for (let k = 0; k < n; k++) {
+    const r = 0.92 * Math.sqrt((k + 0.5) / n);
+    const t = k * golden + phase;
+    const i = byValue[k];
+    sx[i] = r * Math.cos(t) + (rand() - 0.5) * 0.02;
+    sy[i] = r * Math.sin(t) + (rand() - 0.5) * 0.02;
+  }
+  return [sx, sy];
+}
+
+/** Keep w_i - w_j <= d_ij^2 so no site can be squeezed out of existence. */
+function clampWeights(sx, sy, w) {
+  const n = w.length;
+  for (let pass = 0; pass < 4; pass++) {
+    let changed = false;
+    const limit = new Float64Array(n).fill(Infinity);
+    for (let i = 0; i < n; i++) {
+      for (let j = 0; j < n; j++) {
+        if (i === j) continue;
+        const dx = sx[i] - sx[j], dy = sy[i] - sy[j];
+        const cap = w[j] + 0.999 * (dx * dx + dy * dy);
+        if (cap < limit[i]) limit[i] = cap;
+      }
+    }
+    for (let i = 0; i < n; i++) if (w[i] > limit[i]) { w[i] = limit[i]; changed = true; }
+    if (!changed) break;
+  }
+}
+
+function worstRoundness(cells) {
+  let worst = 1;
+  for (const { v } of cells) {
+    if (v.length < 6) return 0;
+    const area = Math.abs(polyArea(v));
+    let perim = 0;
+    const n = v.length / 2;
+    for (let i = 0; i < n; i++) {
+      const j = (i + 1) % n;
+      perim += Math.hypot(v[2 * j] - v[2 * i], v[2 * j + 1] - v[2 * i + 1]);
+    }
+    if (perim <= 0) return 0;
+    worst = Math.min(worst, (4 * Math.PI * area) / (perim * perim));
+  }
+  return worst;
+}
+
+function layoutOnce(values, boundary, { maxIter, tol, damping, seed }) {
+  const n = values.length;
+  const total = Math.abs(polyArea(boundary));
+  const sum = values.reduce((a, b) => a + b, 0);
+  const targets = values.map((v) => (v / sum) * total);
+
+  if (n === 1) {
+    return { cells: [boundary], areas: [total], maxError: 0, iterations: 0, roundness: 1 };
+  }
+
+  const rand = rng(seed);
+  const [sx, sy] = initialSites(values, rand);
+  const w = new Float64Array(n);
+  let best = null, bestErr = Infinity, iterations = 0;
+
+  for (iterations = 1; iterations <= maxIter; iterations++) {
+    const cells = powerCells(sx, sy, w, boundary);
+    const areas = cells.map((c) => Math.abs(polyArea(c.v)));
+
+    // revive any site that lost its cell, in the roomiest neighbour
+    let dead = -1;
+    for (let i = 0; i < n; i++) if (areas[i] <= 0) { dead = i; break; }
+    if (dead >= 0) {
+      let host = 0;
+      for (let i = 1; i < n; i++) if (areas[i] > areas[host]) host = i;
+      const [hx, hy] = polyCentroid(cells[host].v);
+      sx[dead] = hx + (rand() - 0.5) * 0.02;
+      sy[dead] = hy + (rand() - 0.5) * 0.02;
+      w[dead] = w.reduce((a, b) => a + b, 0) / n;
+      clampWeights(sx, sy, w);
+      continue;
+    }
+
+    let err = 0;
+    for (let i = 0; i < n; i++) err = Math.max(err, Math.abs(areas[i] - targets[i]) / targets[i]);
+    if (err < bestErr) { bestErr = err; best = cells.map((c) => c.v); }
+    if (err < tol) break;
+
+    // 1. Lloyd relaxation, for cells that look organic instead of shattered
+    for (let i = 0; i < n; i++) {
+      const [cx, cy] = polyCentroid(cells[i].v);
+      sx[i] = cx; sy[i] = cy;
+    }
+
+    // 2. Newton step: raising w_i pushes each shared edge out by dw / 2 d_ij,
+    //    so dA_i/dw_i = sum(len_ij / 2 d_ij) exactly.
+    for (let i = 0; i < n; i++) {
+      const { v, own } = cells[i];
+      const m = v.length / 2;
+      let gain = 0, nearest = Infinity;
+      for (let k = 0; k < m; k++) {
+        const j = own[k];
+        if (j < 0) continue;
+        const q = (k + 1) % m;
+        const len = Math.hypot(v[2 * q] - v[2 * k], v[2 * q + 1] - v[2 * k + 1]);
+        gain += len / (2 * Math.hypot(sx[j] - sx[i], sy[j] - sy[i]));
+      }
+      for (let j = 0; j < n; j++) {
+        if (j === i) continue;
+        const d2 = (sx[j] - sx[i]) ** 2 + (sy[j] - sy[i]) ** 2;
+        if (d2 < nearest) nearest = d2;
+      }
+      if (gain > 0) {
+        const cap = 0.5 * nearest;
+        const step = (targets[i] - areas[i]) / gain;
+        w[i] += damping * Math.max(-cap, Math.min(cap, step));
+      }
+    }
+    let mean = 0;
+    for (let i = 0; i < n; i++) mean += w[i];
+    mean /= n;
+    for (let i = 0; i < n; i++) w[i] -= mean;
+    clampWeights(sx, sy, w);
+  }
+
+  const areas = best.map((v) => Math.abs(polyArea(v)));
+  return { cells: best, areas, maxError: bestErr, iterations, roundness: worstRoundness(best.map((v) => ({ v }))) };
+}
+
+/**
+ * Lay out one polygon per value. Cell shape depends on where the sites
+ * started, so try a few seeds and keep the best-shaped one: accuracy first,
+ * then the fewest splinter-shaped cells.
+ */
+function voronoiTreemap(values, { seed = 0, attempts = 3, tol = 0.005, maxIter = 400, damping = 0.75 } = {}) {
+  const boundary = circleBoundary(256);
+  let best = null;
+  for (let k = 0; k < attempts; k++) {
+    const run = layoutOnce(values, boundary, { maxIter, tol, damping, seed: seed + k * 7919 + 1 });
+    if (!best) { best = run; continue; }
+    const runOk = run.maxError < tol, bestOk = best.maxError < tol;
+    if (runOk && !bestOk) best = run;
+    else if (runOk === bestOk) {
+      const keyNew = runOk ? run.roundness : -run.maxError;
+      const keyOld = bestOk ? best.roundness : -best.maxError;
+      if (keyNew > keyOld) best = run;
+    }
+  }
+  return best;
+}
+
+/* ==================================================================== *
+ * 2. Where a label goes: the largest circle that fits inside the cell
+ * ==================================================================== */
+
+function distanceToEdges(v, px, py) {
+  let best = Infinity;
+  const n = v.length / 2;
+  for (let i = 0; i < n; i++) {
+    const j = (i + 1) % n;
+    const ax = v[2 * i], ay = v[2 * i + 1];
+    const bx = v[2 * j], by = v[2 * j + 1];
+    const ex = bx - ax, ey = by - ay;
+    const len2 = ex * ex + ey * ey || 1e-30;
+    let t = ((px - ax) * ex + (py - ay) * ey) / len2;
+    t = t < 0 ? 0 : t > 1 ? 1 : t;
+    best = Math.min(best, Math.hypot(px - ax - t * ex, py - ay - t * ey));
+  }
+  return best;
+}
+
+/**
+ * Pole of inaccessibility. The cells are convex, so the distance-to-edge
+ * field has a single peak and plain hill climbing finds it.
+ */
+function poleOfInaccessibility(v) {
+  let [px, py] = polyCentroid(v);
+  let best = distanceToEdges(v, px, py);
+  let step = best;
+  for (let round = 0; round < 40 && step > 1e-5; round++) {
+    let moved = false;
+    for (let k = 0; k < 8; k++) {
+      const a = (TAU * k) / 8;
+      const qx = px + step * Math.cos(a), qy = py + step * Math.sin(a);
+      if (!pointInside(v, qx, qy)) continue;
+      const d = distanceToEdges(v, qx, qy);
+      if (d > best) { best = d; px = qx; py = qy; moved = true; }
+    }
+    if (!moved) step /= 2;
+  }
+  return [px, py, best];
+}
+
+function pointInside(v, px, py) {
+  const n = v.length / 2;
+  for (let i = 0; i < n; i++) {
+    const j = (i + 1) % n;
+    const cross = (v[2 * j] - v[2 * i]) * (py - v[2 * i + 1])
+                - (v[2 * j + 1] - v[2 * i + 1]) * (px - v[2 * i]);
+    if (cross < 0) return false;   // cells are counter-clockwise
+  }
+  return true;
+}
+
+function boxInside(v, cx, cy, w, h) {
+  const hw = w / 2, hh = h / 2;
+  return pointInside(v, cx - hw, cy - hh) && pointInside(v, cx + hw, cy - hh)
+      && pointInside(v, cx - hw, cy + hh) && pointInside(v, cx + hw, cy + hh);
+}
+
+/**
+ * Largest scale at which a w x h block still fits the cell: start from the
+ * exact fit inside the empty circle, then grow into the rest of the cell so a
+ * wide label can use a wide cell.
+ */
+function fitScale(v, cx, cy, w, h, radius) {
+  const diag = Math.hypot(w, h);
+  if (diag <= 0) return 0;
+  let lo = (2 * radius) / diag;
+  if (!boxInside(v, cx, cy, lo * w, lo * h)) return lo;
+  let hi = lo * 4;
+  for (let k = 0; k < 14; k++) {
+    const mid = (lo + hi) / 2;
+    if (boxInside(v, cx, cy, mid * w, mid * h)) lo = mid; else hi = mid;
+  }
+  return lo;
+}
+
+/* ==================================================================== *
+ * 3. Colour
+ * ==================================================================== */
+
+const RAMP_LIGHT = ["#86b6ef", "#5598e7", "#3987e5", "#2a78d6", "#256abf",
+                    "#1c5cab", "#184f95", "#104281", "#0d366b"];
+const RAMP_DARK = ["#184f95", "#1c5cab", "#256abf", "#2a78d6", "#3987e5",
+                   "#5598e7", "#6da7ec", "#86b6ef", "#9ec5f4"];
+// fixed, colour-blind-validated slot order; never cycled past 8
+const CAT_LIGHT = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100",
+                   "#e87ba4", "#008300", "#4a3aa7", "#e34948"];
+const CAT_DARK = ["#3987e5", "#d95926", "#199e70", "#c98500",
+                  "#d55181", "#008300", "#9085e9", "#e66767"];
+const OTHER = "#898781";
+
+const THEMES = {
+  light: { surface: "#ffffff", ramp: RAMP_LIGHT, cat: CAT_LIGHT, rim: "rgba(15,18,22,.12)" },
+  dark: { surface: "#191c20", ramp: RAMP_DARK, cat: CAT_DARK, rim: "rgba(255,255,255,.14)" },
+};
+
+const hex2rgb = (h) => [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)];
+const rgb2hex = (c) => "#" + c.map((x) => Math.round(Math.max(0, Math.min(255, x))).toString(16).padStart(2, "0")).join("");
+
+function rampColor(ramp, t) {
+  const x = Math.max(0, Math.min(1, t)) * (ramp.length - 1);
+  const lo = Math.floor(x), hi = Math.min(lo + 1, ramp.length - 1), f = x - lo;
+  const a = hex2rgb(ramp[lo]), b = hex2rgb(ramp[hi]);
+  return rgb2hex([0, 1, 2].map((i) => a[i] * (1 - f) + b[i] * f));
+}
+
+function tint(color, amount) {
+  const target = amount > 0 ? 255 : 0;
+  const a = Math.abs(amount);
+  return rgb2hex(hex2rgb(color).map((c) => c * (1 - a) + target * a));
+}
+
+function luminance(color) {
+  const [r, g, b] = hex2rgb(color).map((c) => {
+    const s = c / 255;
+    return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+  });
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+/** Whichever of black / white reads better on the fill. */
+function inkOn(color) {
+  const l = luminance(color);
+  return (l + 0.05) / 0.05 >= 1.05 / (l + 0.05) ? "#0b0b0b" : "#ffffff";
+}
+
+/* ==================================================================== *
+ * 4. Parsing and formatting
+ * ==================================================================== */
+
+const DEFAULT_DATA = `China, 1900, Asia
+India, 573, Asia
+U.S., 451, Americas
+Brazil, 204, Americas
+Indonesia, 145, Asia
+Turkiye, 92, Middle East
+Russia, 87, Europe
+Japan, 86, Asia
+France, 82, Europe
+Mexico, 77, Americas
+Pakistan, 75, Asia
+Spain, 64, Europe
+Germany, 60, Europe
+Canada, 58, Americas
+Italy, 56, Europe
+Vietnam, 56, Asia
+Australia, 56, Oceania
+Colombia, 53, Americas
+Thailand, 48, Asia
+S. Korea, 41, Asia
+Egypt, 39, Middle East
+UK, 35, Europe
+Philippines, 35, Asia
+Bangladesh, 34, Asia
+Poland, 34, Europe
+Iran, 31, Middle East
+Algeria, 31, Africa
+Malaysia, 29, Asia
+Ukraine, 29, Europe
+South Africa, 26, Africa
+Peru, 22, Americas
+Kenya, 22, Africa
+Netherlands, 22, Europe
+Greece, 19, Europe
+Uzbekistan, 18, Asia
+Cambodia, 17, Asia
+Morocco, 17, Africa
+New Zealand, 17, Oceania`;
+
+const NUMBER = /^-?[\d,]*\.?\d+(?:[eE][-+]?\d+)?$/;
+
+function toNumber(text) {
+  const t = text.trim().replace(/,(?=\d{3}\b)/g, "");
+  return NUMBER.test(t.replace(/,/g, "")) ? Number(t.replace(/,/g, "")) : NaN;
+}
+
+/** Accepts `12`, `5 3 2 8 1`, `Rent, 60`, `Brazil, 204, Americas`, `Rent: 60`. */
+function parseData(text) {
+  const rows = [];
+  let skipped = 0;
+
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line || line.startsWith("#")) continue;
+
+    if (line.includes(",") || line.includes("\t")) {
+      const parts = line.split(/[,\t]/).map((s) => s.trim());
+      if (parts.length === 1) {
+        const v = toNumber(parts[0]);
+        if (v > 0) rows.push({ label: "", value: v, group: "" }); else skipped++;
+        continue;
+      }
+      // label, value[, group] -- but also a bare "1,900"
+      const asOne = toNumber(line);
+      if (parts.length === 2 && Number.isFinite(asOne) && asOne > 0 && !/[a-z]/i.test(line)) {
+        rows.push({ label: "", value: asOne, group: "" });
+        continue;
+      }
+      const value = toNumber(parts[1]);
+      if (value > 0) rows.push({ label: parts[0], value, group: parts[2] || "" }); else skipped++;
+      continue;
+    }
+
+    const bare = line.split(/\s+/);
+    if (bare.every((t) => Number.isFinite(toNumber(t)))) {
+      for (const t of bare) {
+        const v = toNumber(t);
+        if (v > 0) rows.push({ label: "", value: v, group: "" }); else skipped++;
+      }
+      continue;
+    }
+
+    const m = line.match(/^(.*?)[\s:=]+(-?[\d.,]+(?:[eE][-+]?\d+)?)$/);
+    if (m) {
+      const v = toNumber(m[2]);
+      if (v > 0) { rows.push({ label: m[1].trim(), value: v, group: "" }); continue; }
+    }
+    skipped++;
+  }
+  return { rows, skipped };
+}
+
+/**
+ * A unit you typed is taken as the one the numbers are already in ("42" + "B"),
+ * so the K/M/B/T scaling steps aside for it.
+ */
+function compact(v, prefix = "", suffix = "") {
+  const a = Math.abs(v);
+  if (!suffix) {
+    for (const [limit, unit] of [[1e12, "T"], [1e9, "B"], [1e6, "M"], [1e3, "K"]]) {
+      if (a >= limit) {
+        const s = v / limit;
+        return prefix + (Math.abs(s) < 100 ? String(+s.toFixed(1)) : String(Math.round(s))) + unit;
+      }
+    }
+  }
+  const body = a >= 100 || Number.isInteger(v)
+    ? v.toLocaleString("en-US", { maximumFractionDigits: 0 })
+    : String(+v.toPrecision(3));
+  return prefix + body + suffix;
+}
+
+/* ==================================================================== *
+ * 5. Drawing
+ * ==================================================================== */
+
+const SVG_NS = "http://www.w3.org/2000/svg";
+const VIEW = 1.06;            // half-extent of the viewBox, in circle radii
+const FONT = getComputedStyle(document.documentElement).getPropertyValue("--font-ui").trim()
+          || "system-ui, sans-serif";
+const MONO = getComputedStyle(document.documentElement).getPropertyValue("--font-mono").trim()
+          || "monospace";
+const measurer = document.createElement("canvas").getContext("2d");
+
+/** Text width in circle-radius units, per unit of font size. */
+function widthPerSize(text, weight, family) {
+  measurer.font = `${weight} 100px ${family}`;
+  return measurer.measureText(text).width / 100;
+}
+
+/**
+ * Height of a line's box per unit of font size. Measured, not assumed: a line
+ * box runs about 1.15 em in these faces, and treating it as 1 em is exactly
+ * how a label ends up 15 % taller than the cell it was fitted to.
+ */
+function heightPerSize(weight, family) {
+  measurer.font = `${weight} 100px ${family}`;
+  const m = measurer.measureText("Hxg");
+  const h = (m.fontBoundingBoxAscent + m.fontBoundingBoxDescent) / 100;
+  return Number.isFinite(h) && h > 0 ? h : 1.2;
+}
+
+const NAME_SCALE = 0.82;                       // name sits below the value
+const H_NAME = NAME_SCALE * heightPerSize(400, FONT);
+const H_VALUE = heightPerSize(700, MONO);
+const H_GAP = 0.16 * H_NAME;
+
+function theme() {
+  const stamped = document.documentElement.dataset.theme;
+  if (stamped === "dark" || stamped === "light") return stamped;
+  return matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+}
+
+function colorsFor(rows, layout, mode, tokens) {
+  const n = rows.length;
+  const values = rows.map((r) => r.value);
+  const rank = Array.from(values.keys()).sort((a, b) => values[b] - values[a]);
+  const rankOf = new Array(n);
+  rank.forEach((idx, r) => { rankOf[idx] = r; });
+
+  if (mode === "single") return { fills: new Array(n).fill(tokens.cat[0]), legend: [] };
+
+  if (mode === "group") {
+    const totals = new Map();
+    rows.forEach((r) => totals.set(r.group || "Other", (totals.get(r.group || "Other") || 0) + r.value));
+    const ranked = [...totals.keys()].sort((a, b) => totals.get(b) - totals.get(a));
+    const base = new Map();
+    ranked.forEach((g, i) => base.set(g, i < tokens.cat.length ? tokens.cat[i] : OTHER));
+
+    const fills = new Array(n);
+    for (const g of ranked) {
+      const members = rows.map((r, i) => i).filter((i) => (rows[i].group || "Other") === g);
+      members.sort((a, b) => values[b] - values[a]);
+      members.forEach((i, k) => {
+        const span = 0.34;
+        fills[i] = tint(base.get(g), (k / Math.max(members.length - 1, 1)) * span - span / 3);
+      });
+    }
+    return { fills, legend: ranked.map((g) => ({ name: g, color: base.get(g) })) };
+  }
+
+  const fills = rows.map((_, i) => rampColor(tokens.ramp, 1 - rankOf[i] / Math.max(n - 1, 1)));
+  return { fills, legend: [] };
+}
+
+function valueText(v, total) {
+  return state.percent
+    ? `${((v / total) * 100).toFixed(1)}%`
+    : compact(v, state.prefix, state.suffix);
+}
+
+function render() {
+  const host = document.getElementById("chart");
+  const caption = document.getElementById("caption");
+  const legendBox = document.getElementById("legend");
+  host.replaceChildren();
+  legendBox.replaceChildren();
+  caption.textContent = "";
+  if (!state.layout) {
+    const p = document.createElement("div");
+    p.className = "empty";
+    p.textContent = "Add some numbers to draw a circle.";
+    host.append(p);
+    return;
+  }
+
+  const tokens = THEMES[theme()];
+  const { rows, layout } = state;
+  const { fills, legend } = colorsFor(rows, layout, state.colorMode, tokens);
+  state.legend = legend;
+  state.fills = fills;
+  const total = rows.reduce((a, r) => a + r.value, 0);
+
+  const pxPerUnit = (host.clientWidth || 600) / (2 * VIEW);
+  const minSize = 6 / pxPerUnit;          // never draw text below 6 CSS px
+  const maxSize = 0.15;
+
+  const svg = document.createElementNS(SVG_NS, "svg");
+  svg.setAttribute("viewBox", `${-VIEW} ${-VIEW} ${2 * VIEW} ${2 * VIEW}`);
+  svg.setAttribute("role", "img");
+  svg.setAttribute("aria-label", `${rows.length} polygons, area proportional to value`);
+
+  const cellsG = document.createElementNS(SVG_NS, "g");
+  cellsG.setAttribute("class", "cells");
+  svg.append(cellsG);
+  const labelsG = document.createElementNS(SVG_NS, "g");
+  svg.append(labelsG);
+
+  const unnamed = [];
+
+  layout.cells.forEach((v, i) => {
+    if (v.length < 6) return;
+    let d = "";
+    for (let k = 0; k < v.length; k += 2) d += `${k ? "L" : "M"}${v[k].toFixed(4)},${(-v[k + 1]).toFixed(4)}`;
+    const path = document.createElementNS(SVG_NS, "path");
+    path.setAttribute("d", d + "Z");
+    path.setAttribute("fill", fills[i]);
+    path.setAttribute("stroke", tokens.surface);
+    path.setAttribute("stroke-width", "0.008");
+    path.setAttribute("stroke-linejoin", "round");
+    path.dataset.cell = String(i);
+    cellsG.append(path);
+
+    // ---- label -------------------------------------------------------
+    const value = valueText(rows[i].value, total);
+    const name = state.showNames ? rows[i].label : "";
+    const [ax, ay, radius] = poleOfInaccessibility(v);
+    if (radius <= 0) { unnamed.push({ i, value }); return; }
+
+    const ink = inkOn(fills[i]);
+    const wValue = widthPerSize(value, 700, MONO);
+    const wName = name ? widthPerSize(name, 400, FONT) : 0;
+
+    // Everything below is per unit of the value's font size, so one number --
+    // `size` -- comes out of the fit and drives the whole block.
+    for (const lines of [name ? ["name", "value"] : ["value"], ["value"], []]) {
+      if (!lines.length) { unnamed.push({ i, value }); break; }
+      const two = lines.length === 2;
+      const hUnit = two ? H_VALUE + H_NAME + H_GAP : H_VALUE;
+      const wUnit = two ? Math.max(wName * NAME_SCALE, wValue) : wValue;
+      const size = Math.min(0.95 * fitScale(v, ax, ay, wUnit, hUnit, radius * 0.94), maxSize);
+
+      if (size < minSize) {
+        if (two) continue;                       // retry with the value alone
+        unnamed.push({ i, value });
+        break;
+      }
+
+      let top = ay + (hUnit * size) / 2;
+      for (const line of lines) {
+        const isValue = line === "value";
+        const box = (isValue ? H_VALUE : H_NAME) * size;
+        const text = document.createElementNS(SVG_NS, "text");
+        text.setAttribute("x", ax.toFixed(4));
+        text.setAttribute("y", (-(top - box / 2)).toFixed(4));
+        text.setAttribute("text-anchor", "middle");
+        text.setAttribute("dominant-baseline", "central");
+        text.setAttribute("fill", ink);
+        text.setAttribute("font-size", ((isValue ? 1 : NAME_SCALE) * size).toFixed(4));
+        text.setAttribute("font-family", isValue ? MONO : FONT);
+        text.setAttribute("font-weight", isValue ? "700" : "400");
+        text.setAttribute("pointer-events", "none");
+        text.dataset.cell = String(i);
+        text.textContent = isValue ? value : name;
+        labelsG.append(text);
+        top -= box + H_GAP * size;
+      }
+      if (!two && name) unnamed.push({ i, value });
+      break;
+    }
+  });
+
+  const rim = document.createElementNS(SVG_NS, "circle");
+  rim.setAttribute("r", "1");
+  rim.setAttribute("fill", "none");
+  rim.setAttribute("stroke", tokens.rim);
+  rim.setAttribute("stroke-width", "0.006");
+  svg.append(rim);
+
+  host.append(svg);
+
+  const tip = document.getElementById("tip");
+  const hideTip = () => { tip.hidden = true; };
+  const showTip = (event) => {
+    const path = event.target.closest("path[data-cell]");
+    if (!path) return hideTip();
+    const i = Number(path.dataset.cell);
+    const share = ((rows[i].value / total) * 100).toFixed(1);
+    tip.innerHTML =
+      `<span class="swatch" style="background:${fills[i]}"></span>` +
+      `<span class="name"></span><br><span class="num"></span>`;
+    tip.querySelector(".name").textContent = rows[i].label || `Item ${i + 1}`;
+    tip.querySelector(".num").textContent =
+      `${compact(rows[i].value, state.prefix, state.suffix)} · ${share}% of total`;
+    tip.hidden = false;
+    const pad = 10;
+    const half = tip.offsetWidth / 2;
+    tip.style.left = `${Math.min(Math.max(event.clientX, half + pad), innerWidth - half - pad)}px`;
+    tip.style.top = `${Math.max(event.clientY - 12, tip.offsetHeight + pad)}px`;
+  };
+  svg.addEventListener("pointermove", showTip);
+  svg.addEventListener("pointerdown", showTip);
+  svg.addEventListener("pointerleave", hideTip);
+  addEventListener("scroll", hideTip, { passive: true });
+
+  // ---- legend and the too-small list ---------------------------------
+  const bits = [];
+  if (legend.length) {
+    const wrap = document.createElement("div");
+    wrap.style.cssText = "display:flex;flex-wrap:wrap;gap:4px 14px;font-size:12px;color:var(--ink-2)";
+    for (const item of legend) {
+      const chip = document.createElement("span");
+      chip.style.cssText = "display:inline-flex;align-items:center;gap:6px";
+      chip.innerHTML = `<span style="width:9px;height:9px;border-radius:50%;background:${item.color}"></span>`;
+      chip.append(item.name);
+      wrap.append(chip);
+    }
+    legendBox.append(wrap);
+  }
+  caption.textContent = "";
+  state.caption = "";
+  if (unnamed.length) {
+    const named = unnamed
+      .sort((a, b) => rows[b.i].value - rows[a.i].value)
+      .map(({ i, value }) => `${rows[i].label || "#" + (i + 1)} ${value}`);
+    state.caption = "Too small to name: " + named.join(", ");
+    if (named.length <= 4) {
+      caption.textContent = state.caption;
+    } else {
+      // a long list would swamp the chart on a phone, so tuck it away --
+      // tapping a cell names it too
+      const box = document.createElement("details");
+      const head = document.createElement("summary");
+      head.textContent = `${named.length} cells too small to name`;
+      box.append(head, named.join(", "));
+      caption.append(box);
+    }
+  }
+}
+
+/* ==================================================================== *
+ * 6. State and wiring
+ * ==================================================================== */
+
+const state = {
+  rows: [],
+  layout: null,
+  colorMode: "value",
+  percent: false,
+  showNames: true,
+  prefix: "$",
+  suffix: "B",
+  seed: 1,
+};
+
+const els = {
+  data: document.getElementById("data"),
+  title: document.getElementById("title"),
+  prefix: document.getElementById("prefix"),
+  suffix: document.getElementById("suffix"),
+  readout: document.getElementById("readout"),
+  warn: document.getElementById("parse-warn"),
+};
+
+function setReadout({ working } = {}) {
+  const { rows, layout } = state;
+  const parts = [];
+  if (working) parts.push(`<span class="working">solving…</span>`);
+  parts.push(`<span><b>${rows.length}</b> cells</span>`);
+  if (layout) {
+    parts.push(`<span>areas exact to <b>${(layout.maxError * 100).toFixed(2)}%</b></span>`);
+    parts.push(`<span><b>${layout.iterations}</b> iterations</span>`);
+    parts.push(`<span><b>${state.ms}</b> ms</span>`);
+  }
+  els.readout.innerHTML = parts.join("");
+}
+
+const MAX_ITEMS = 200;
+
+function recompute() {
+  const { rows, skipped } = parseData(els.data.value);
+  const capped = rows.slice(0, MAX_ITEMS);
+  state.rows = capped;
+
+  const notes = [];
+  if (skipped) notes.push(`${skipped} line${skipped > 1 ? "s" : ""} skipped — each needs a positive number.`);
+  if (rows.length > MAX_ITEMS) notes.push(`Showing the first ${MAX_ITEMS} of ${rows.length}.`);
+  els.warn.textContent = notes.join(" ");
+
+  const hasGroups = capped.some((r) => r.group);
+  document.querySelector('[data-color="group"]').disabled = !hasGroups;
+  if (!hasGroups && state.colorMode === "group") setColorMode("value", false);
+
+  if (!capped.length) { state.layout = null; setReadout(); render(); return; }
+
+  setReadout({ working: true });
+  // yield a frame so the readout paints before the solve blocks
+  requestAnimationFrame(() => {
+    const t0 = performance.now();
+    state.layout = voronoiTreemap(capped.map((r) => r.value), {
+      seed: state.seed,
+      attempts: capped.length <= 60 ? 3 : 1,
+    });
+    state.ms = Math.round(performance.now() - t0);
+    setReadout();
+    render();
+  });
+}
+
+function setColorMode(mode, redraw = true) {
+  state.colorMode = mode;
+  for (const b of document.querySelectorAll("[data-color]")) {
+    b.setAttribute("aria-pressed", String(b.dataset.color === mode));
+  }
+  if (redraw) render();
+}
+
+let typing;
+els.data.addEventListener("input", () => {
+  clearTimeout(typing);
+  typing = setTimeout(recompute, 320);
+});
+
+for (const b of document.querySelectorAll("[data-color]")) {
+  b.addEventListener("click", () => setColorMode(b.dataset.color));
+}
+document.getElementById("pct").addEventListener("change", (e) => {
+  state.percent = e.target.checked;
+  render();
+});
+document.getElementById("names").addEventListener("change", (e) => {
+  state.showNames = e.target.checked;
+  render();
+});
+for (const key of ["prefix", "suffix"]) {
+  els[key].addEventListener("input", () => { state[key] = els[key].value; render(); });
+}
+document.getElementById("shuffle").addEventListener("click", () => {
+  state.seed = (state.seed * 31 + 17) % 100000;
+  recompute();
+});
+
+/** Export the SVG through a canvas so the download is a plain PNG. */
+document.getElementById("download").addEventListener("click", async () => {
+  const svg = document.querySelector("#chart svg");
+  if (!svg) return;
+  const tokens = THEMES[theme()];
+  const size = 1600;
+  const clone = svg.cloneNode(true);
+  clone.setAttribute("xmlns", SVG_NS);
+  clone.setAttribute("width", size);
+  clone.setAttribute("height", size);
+
+  const title = els.title.value.trim();
+  const source = new XMLSerializer().serializeToString(clone);
+  const img = new Image();
+  img.src = "data:image/svg+xml;base64," + btoa(unescape(encodeURIComponent(source)));
+  await img.decode();
+
+  const legend = state.legend || [];
+  const caption = state.caption || "";
+  const pad = 40;
+  const head = title ? 96 : 0;
+  const legendH = legend.length ? 64 : 0;
+  const captionH = caption ? 34 : 0;
+
+  const canvas = document.createElement("canvas");
+  canvas.width = size + pad * 2;
+  canvas.height = size + pad * 2 + head + legendH + captionH;
+  const ctx = canvas.getContext("2d");
+  const ink = inkOn(tokens.surface);
+  ctx.fillStyle = tokens.surface;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.textBaseline = "middle";
+
+  if (title) {
+    ctx.fillStyle = ink;
+    ctx.font = `680 44px ${FONT}`;
+    ctx.fillText(title, pad, pad + head / 2 - 8);
+  }
+  ctx.drawImage(img, pad, pad + head, size, size);
+
+  if (legend.length) {
+    // measure first so the row can be centred, and shrink it if it is too wide
+    let fontSize = 28, widths, total;
+    do {
+      ctx.font = `${fontSize}px ${FONT}`;
+      widths = legend.map((l) => ctx.measureText(l.name).width + 22);
+      total = widths.reduce((a, w) => a + w + 34, -34);
+      if (total <= canvas.width - pad * 2) break;
+      fontSize -= 2;
+    } while (fontSize > 16);
+
+    let x = (canvas.width - total) / 2;
+    const y = pad + head + size + legendH / 2;
+    legend.forEach((item, k) => {
+      ctx.fillStyle = item.color;
+      ctx.beginPath();
+      ctx.arc(x + 7, y, 7, 0, TAU);
+      ctx.fill();
+      ctx.fillStyle = ink;
+      ctx.fillText(item.name, x + 22, y + 1);
+      x += widths[k] + 34;
+    });
+  }
+
+  if (caption) {
+    ctx.fillStyle = OTHER;
+    ctx.font = `22px ${FONT}`;
+    let line = caption;
+    while (ctx.measureText(line).width > canvas.width - pad * 2 && line.length > 20) {
+      line = line.slice(0, -8);
+    }
+    if (line !== caption) line = line.replace(/,?\s*$/, "…");
+    ctx.fillText(line, pad, pad + head + size + legendH + captionH / 2);
+  }
+
+  const a = document.createElement("a");
+  a.href = canvas.toDataURL("image/png");
+  a.download = (title ? title.replace(/[^\w\s-]/g, "").trim().replace(/\s+/g, "-").toLowerCase() : "area-circles") + ".png";
+  a.click();
+});
+
+// theme and width changes only repaint; the geometry is already solved
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", render);
+new MutationObserver(render).observe(document.documentElement, {
+  attributes: true, attributeFilter: ["data-theme"],
+});
+// width changes the px-per-unit scale, so the smallest labels have to be
+// re-fitted; ignore the sub-pixel churn that redrawing itself causes
+let resizing, lastWidth = 0;
+new ResizeObserver(([entry]) => {
+  const w = Math.round(entry.contentRect.width);
+  if (Math.abs(w - lastWidth) < 8) return;
+  lastWidth = w;
+  clearTimeout(resizing);
+  resizing = setTimeout(render, 150);
+}).observe(document.getElementById("chart"));
+
+els.data.value = DEFAULT_DATA;
+setColorMode("group", false);
+recompute();
+</script>

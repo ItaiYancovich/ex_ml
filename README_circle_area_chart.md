@@ -10,6 +10,12 @@ infographics.
 python circle_area_chart.py --demo -o demo.png
 ```
 
+## In a browser (phone included)
+
+`area_circles.html` is the same layout ported to JavaScript in one self-contained
+file — no build step, no network. Open it directly, type numbers, and download
+the result as a PNG. Tap any cell to name it.
+
 ## Use it
 
 ```python
