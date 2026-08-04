@@ -45,6 +45,11 @@ from math import comb
 from hypercube_packing import (cyclic_orbit_code, hamming, lexicode,
                                min_distance, popcount, verify)
 
+try:
+    import brouwer_table
+except ImportError:                              # reference data is optional
+    brouwer_table = None
+
 # --------------------------------------------------------------------------
 # linear algebra over F2, on integer bitmasks
 # --------------------------------------------------------------------------
@@ -474,6 +479,47 @@ def build(max_n, max_d, lex_limit=14, orbit_limit=10, margin=4, verbose=False):
 # --------------------------------------------------------------------------
 
 
+def literature_table(max_n, max_d):
+    """The published best-known bounds, in the same shape as build()."""
+    if brouwer_table is None:
+        raise SystemExit("brouwer_table.py is not available")
+    T = {}
+    for n in range(1, max_n + 1):
+        for d in range(1, max_d + 1):
+            b = brouwer_table.bounds(n, d)
+            if b is None:
+                T[(n, d)] = Bounds(1, 1 << n, "not tabulated", "not tabulated")
+            else:
+                T[(n, d)] = Bounds(b[0], b[1], "published", "published")
+    return T
+
+
+def compare(ours, lit, max_n, max_d, min_d):
+    """How our from-scratch bounds stack up against the published ones."""
+    live = [(n, d) for n in range(1, max_n + 1)
+            for d in range(min_d, max_d + 1) if d <= n]
+    ours_x = [k for k in live if ours[k].exact]
+    lit_x = [k for k in live if lit[k].exact]
+    out = ["", f"cells with d <= n:      {len(live)}",
+           f"exact, from scratch:    {len(ours_x)}",
+           f"exact, published:       {len(lit_x)}"]
+
+    disagree = [k for k in ours_x if not (lit[k].lo == lit[k].hi == ours[k].lo)]
+    out.append(f"disagreements:          {len(disagree)}"
+               + ("" if not disagree else f"  {disagree}"))
+
+    behind = []
+    for k in live:
+        if lit[k].lo > ours[k].lo:
+            behind.append((lit[k].lo / max(ours[k].lo, 1), k))
+    out.append("")
+    out.append(f"published lower bound beats ours in {len(behind)} cells; worst:")
+    for ratio, (n, d) in sorted(behind, reverse=True)[:6]:
+        out.append(f"  A({n:2d},{d:2d})  ours >= {ours[(n, d)].lo:<8}"
+                   f" published >= {lit[(n, d)].lo:<8} ({ratio:.1f}x)")
+    return "\n".join(out)
+
+
 def cell_text(c):
     if c.exact:
         return str(c.lo)
@@ -560,6 +606,10 @@ def main(argv=None):
                    help="first column shown; d=1,2 are trivially 2^n and 2^(n-1)")
     p.add_argument("--format", choices=("table", "markdown", "csv"), default="table")
     p.add_argument("--stats", action="store_true", help="coverage summary")
+    p.add_argument("--literature", action="store_true",
+                   help="show the published best-known bounds instead of ours")
+    p.add_argument("--compare", action="store_true",
+                   help="compare our from-scratch bounds against the published ones")
     p.add_argument("--lex-limit", type=int, default=14,
                    help="run the lexicode search up to this n (default 14)")
     p.add_argument("--orbit-limit", type=int, default=10,
@@ -572,8 +622,14 @@ def main(argv=None):
     if args.min_d < 1 or args.min_d > args.max_d:
         p.error("--min-d must be between 1 and --max-d")
 
-    T = build(args.max_n, args.max_d, lex_limit=args.lex_limit,
-              orbit_limit=args.orbit_limit, verbose=args.verbose)
+    ours = build(args.max_n, args.max_d, lex_limit=args.lex_limit,
+                 orbit_limit=args.orbit_limit, verbose=args.verbose)
+    T = literature_table(args.max_n, args.max_d) if args.literature else ours
+
+    if args.compare:
+        lit = T if args.literature else literature_table(args.max_n, args.max_d)
+        print(compare(ours, lit, args.max_n, args.max_d, args.min_d).lstrip("\n"))
+        print()
 
     if args.format == "markdown":
         print(render_markdown(T, args.max_n, args.max_d, args.min_d))
