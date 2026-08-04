@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
 """Bounds on A(n, d) for cubes too big to settle exactly.
 
-`hypercube_packing.py` pins down A(n, d) exactly for n, d <= 9.  Past that the
-problem stops being a computation and becomes an open research question: the
-exact value of A(10, 3), for instance, is not known to anybody.  So this script
-reports what is honestly available -- a lower bound from a code we actually
-build, an upper bound from a proved theorem, and an exact value only where the
-two coincide.
+`hypercube_packing.py` pins down A(n, d) exactly for n, d <= 9.  Past that this
+script reports what it can honestly derive -- a lower bound from a code it
+actually builds, an upper bound from a proved theorem, and an exact value only
+where the two coincide.
+
+Exactness runs out well before the published record does, and the record itself
+runs out: A(15, 3) = 2048 is known, while A(16, 3) is open and has been for
+decades.  Use --literature to see the published best-known bounds alongside
+these, and --compare to see the difference.
 
 Lower bounds come from
   * the greedy lexicode and the cyclic-orbit search, while those stay affordable,
@@ -30,10 +33,11 @@ Plotkin-tight ridge around d = n/2 wherever a Hadamard matrix exists.
 
 Usage
 -----
-    python3 hypercube_bounds.py                       # n <= 24
-    python3 hypercube_bounds.py --max-n 32 --min-d 3
-    python3 hypercube_bounds.py --format markdown
-    python3 hypercube_bounds.py --stats
+    python3 hypercube_bounds.py                       # n <= 24, our own bounds
+    python3 hypercube_bounds.py --literature          # published best known
+    python3 hypercube_bounds.py --compare             # ours against published
+    python3 hypercube_bounds.py --percent --min-d 1   # share of the 2^n vertices
+    python3 hypercube_bounds.py --format markdown --stats
 """
 
 from __future__ import annotations
@@ -520,17 +524,31 @@ def compare(ours, lit, max_n, max_d, min_d):
     return "\n".join(out)
 
 
-def cell_text(c):
-    if c.exact:
-        return str(c.lo)
-    return f"{c.lo}-{c.hi}"
+def format_percent(fraction):
+    """A(n,d)/2^n as a percentage, readable across seven orders of magnitude."""
+    pct = 100.0 * fraction
+    if pct >= 99.999:
+        return "100%"
+    if pct >= 0.001:
+        return f"{pct:.3g}%"
+    return f"{pct:.1e}%"
 
 
-def render_table(T, max_n, max_d, min_d):
+def cell_text(c, n=None, percent=False):
+    """The cell as a count, or as a share of the cube's 2^n vertices."""
+    if not percent:
+        return str(c.lo) if c.exact else f"{c.lo}-{c.hi}"
+    share = format_percent(c.lo / (1 << n))
+    return share if c.exact else ">=" + share
+
+
+def render_table(T, max_n, max_d, min_d, percent=False):
     cols = list(range(min_d, max_d + 1))
-    width = max(6, max(len(cell_text(T[(n, d)])) for n in range(1, max_n + 1)
-                       for d in cols) + 2)
-    out = ["A(n, d) - exact where the bounds meet, otherwise lower-upper", ""]
+    width = max(6, max(len(cell_text(T[(n, d)], n, percent))
+                       for n in range(1, max_n + 1) for d in cols) + 2)
+    out = (["A(n, d) as a share of the cube's 2^n vertices "
+            "(>= means the value is not settled)", ""] if percent else
+           ["A(n, d) - exact where the bounds meet, otherwise lower-upper", ""])
     corner = "n \\ d"
     head = f"{corner:>6} |" + "".join(f"{d:>{width}}" for d in cols)
     out.append(head)
@@ -538,12 +556,12 @@ def render_table(T, max_n, max_d, min_d):
     for n in range(1, max_n + 1):
         row = f"{n:>6} |"
         for d in cols:
-            row += f"{cell_text(T[(n, d)]):>{width}}"
+            row += f"{cell_text(T[(n, d)], n, percent):>{width}}"
         out.append(row)
     return "\n".join(out)
 
 
-def render_markdown(T, max_n, max_d, min_d):
+def render_markdown(T, max_n, max_d, min_d, percent=False):
     cols = list(range(min_d, max_d + 1))
     out = ["| n \\ d | " + " | ".join(str(d) for d in cols) + " |",
            "|---:" * (len(cols) + 1) + "|"]
@@ -551,7 +569,8 @@ def render_markdown(T, max_n, max_d, min_d):
         cells = []
         for d in cols:
             c = T[(n, d)]
-            cells.append(f"**{c.lo}**" if c.exact else cell_text(c))
+            text = cell_text(c, n, percent)
+            cells.append(f"**{text}**" if c.exact else text)
         out.append(f"| **{n}** | " + " | ".join(cells) + " |")
     out.append("")
     out.append("Bold = exact (lower and upper bound coincide). "
@@ -561,11 +580,12 @@ def render_markdown(T, max_n, max_d, min_d):
 
 def render_csv(T, max_n, max_d, min_d):
     cols = list(range(min_d, max_d + 1))
-    out = ["n,d,lower,upper,exact,why_lower,why_upper"]
+    out = ["n,d,lower,upper,exact,share_of_2^n,why_lower,why_upper"]
     for n in range(1, max_n + 1):
         for d in cols:
             c = T[(n, d)]
-            out.append(f"{n},{d},{c.lo},{c.hi},{int(c.exact)},{c.why_lo},{c.why_hi}")
+            out.append(f"{n},{d},{c.lo},{c.hi},{int(c.exact)},"
+                       f"{c.lo / (1 << n):.6g},{c.why_lo},{c.why_hi}")
     return "\n".join(out)
 
 
@@ -610,6 +630,8 @@ def main(argv=None):
                    help="show the published best-known bounds instead of ours")
     p.add_argument("--compare", action="store_true",
                    help="compare our from-scratch bounds against the published ones")
+    p.add_argument("--percent", action="store_true",
+                   help="show each value as a share of the cube's 2^n vertices")
     p.add_argument("--lex-limit", type=int, default=14,
                    help="run the lexicode search up to this n (default 14)")
     p.add_argument("--orbit-limit", type=int, default=10,
@@ -632,11 +654,11 @@ def main(argv=None):
         print()
 
     if args.format == "markdown":
-        print(render_markdown(T, args.max_n, args.max_d, args.min_d))
+        print(render_markdown(T, args.max_n, args.max_d, args.min_d, args.percent))
     elif args.format == "csv":
         print(render_csv(T, args.max_n, args.max_d, args.min_d))
     else:
-        print(render_table(T, args.max_n, args.max_d, args.min_d))
+        print(render_table(T, args.max_n, args.max_d, args.min_d, args.percent))
     if args.stats:
         print(render_stats(T, args.max_n, args.max_d, args.min_d))
     return 0
